@@ -1,0 +1,19 @@
+services:
+  postgis:
+    image: postgis/postgis:17-3.5
+    container_name: ulpin-postgis
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ulpin_db
+      POSTGRES_USER: ulpin_admin
+      POSTGRES_PASSWORD: ulpin_dev_password
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - ulpin_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  ulpin_postgres_data:xxxx    

@@ -1,0 +1,172 @@
+# ==========================================
+# Dependencies
+# ==========================================
+
+node_modules/
+**/node_modules/
+
+
+# ==========================================
+# Environment / Secrets
+# ==========================================
+
+.env
+.env.*
+!.env.example
+
+# Local environment files
+*.local
+
+
+# ==========================================
+# Build / Distribution
+# ==========================================
+
+dist/
+build/
+out/
+
+**/dist/
+**/build/
+**/out/
+
+.vite/
+
+
+# ==========================================
+# Logs
+# ==========================================
+
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+logs/
+
+
+# ==========================================
+# Testing / Coverage
+# ==========================================
+
+coverage/
+.nyc_output/
+
+
+# ==========================================
+# TypeScript
+# ==========================================
+
+*.tsbuildinfo
+
+
+# ==========================================
+# Operating System
+# ==========================================
+
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+
+# ==========================================
+# Windows
+# ==========================================
+
+*.lnk
+
+
+# ==========================================
+# VS Code
+# ==========================================
+
+.vscode/
+
+# Keep workspace recommendations/settings if you want them
+# Uncomment if you want to commit shared VS Code settings:
+# !.vscode/extensions.json
+# !.vscode/settings.json
+
+
+# ==========================================
+# IDEs
+# ==========================================
+
+.idea/
+*.iml
+
+
+# ==========================================
+# Temporary files
+# ==========================================
+
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+
+# ==========================================
+# Database / Local Data
+# ==========================================
+
+*.sql.gz
+*.dump
+*.bak
+*.sqlite
+*.sqlite3
+
+# PostgreSQL local files
+postgres-data/
+pgdata/
+data/
+
+
+# ==========================================
+# Docker
+# ==========================================
+
+# Local Docker volumes/data
+docker-data/
+.docker/
+
+
+# ==========================================
+# OS / Tool caches
+# ==========================================
+
+.cache/
+.npm/
+.yarn/
+.pnpm-store/
+
+
+# ==========================================
+# Generated Cesium files
+# ==========================================
+
+# Keep your actual Cesium public assets if they
+# are required by the application.
+# Do NOT ignore apps/web/public/cesium/ unless
+# you know those files are generated/downloaded.
+
+
+# ==========================================
+# Local secrets / certificates
+# ==========================================
+
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+
+# ==========================================
+# Backup files
+# ==========================================
+
+*.backup
+*.bak
+*.old
