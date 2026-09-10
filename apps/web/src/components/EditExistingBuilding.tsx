@@ -44,6 +44,17 @@ type Owner = {
   ownership_percentage: number;
 };
 
+type OwnershipHistoryRecord = {
+  id: string;
+  owner_id: string;
+  name: string;
+  contact: string | null;
+  ownership_percentage: number;
+  valid_from: string;
+  valid_to: string | null;
+  is_current: boolean;
+};
+
 type RegistryStatus =
   | "UNREGISTERED"
   | "REGISTERED";
@@ -143,6 +154,34 @@ function EditExistingBuilding() {
   const [isRegistering, setIsRegistering] =
     useState(false);
 
+  const [showTransferForm, setShowTransferForm] =
+    useState(false);
+
+  const [transferOwnerName, setTransferOwnerName] =
+    useState("");
+
+  const [transferOwnerContact, setTransferOwnerContact] =
+    useState("");
+
+  const [transferOwnershipPercentage, setTransferOwnershipPercentage] =
+    useState("100");
+
+  const [transferDate, setTransferDate] =
+    useState(
+      new Date()
+        .toISOString()
+        .slice(0, 10)
+    );
+
+  const [isTransferring, setIsTransferring] =
+    useState(false);
+
+  const [ownershipHistory, setOwnershipHistory] =
+    useState<OwnershipHistoryRecord[]>([]);
+
+  const [isLoadingHistory, setIsLoadingHistory] =
+    useState(false);
+
   /*
   |--------------------------------------------------------------------------
   | LOAD BUILDINGS
@@ -180,7 +219,7 @@ function EditExistingBuilding() {
         if (!response.ok) {
           throw new Error(
             data.message ||
-              "Failed to load buildings."
+            "Failed to load buildings."
           );
         }
 
@@ -263,13 +302,13 @@ function EditExistingBuilding() {
         if (!response.ok) {
           throw new Error(
             data.message ||
-              "Failed to load property units."
+            "Failed to load property units."
           );
         }
 
         setPropertyUnits(
           data.property_units ??
-            []
+          []
         );
       } catch (err) {
         setError(
@@ -337,7 +376,7 @@ function EditExistingBuilding() {
 
           const data =
             (await response.json()) as
-              PropertyDetailsResponse;
+            PropertyDetailsResponse;
 
           if (
             data.property?.owner
@@ -622,7 +661,7 @@ function EditExistingBuilding() {
       if (!response.ok) {
         throw new Error(
           data.message ||
-            "Property registration failed."
+          "Property registration failed."
         );
       }
 
@@ -671,6 +710,310 @@ function EditExistingBuilding() {
       setIsRegistering(
         false
       );
+    }
+  }
+
+  /*
+|--------------------------------------------------------------------------
+| OPEN TRANSFER FORM
+|--------------------------------------------------------------------------
+*/
+
+  async function loadOwnershipHistory() {
+    if (!selectedUnit) {
+      return;
+    }
+
+    setIsLoadingHistory(true);
+    setError("");
+
+    try {
+      const token = getAuthToken();
+
+      if (!token) {
+        throw new Error(
+          "Authentication token not found."
+        );
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/property-units/${encodeURIComponent(
+          selectedUnit.vertical_property_id
+        )}/history`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+          "Failed to load ownership history."
+        );
+      }
+
+      setOwnershipHistory(
+        data.ownership_history ?? []
+      );
+    } catch (err) {
+      console.error(
+        "Ownership history error:",
+        err
+      );
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to load ownership history."
+      );
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }
+
+  function openTransferForm() {
+
+
+    if (!selectedUnit) {
+      return;
+    }
+
+    const currentOwner =
+      propertyOwners[selectedUnit.id];
+
+    setError("");
+    setSuccessMessage("");
+
+    setTransferOwnerName("");
+    setTransferOwnerContact("");
+    setTransferOwnershipPercentage(
+      String(
+        currentOwner?.ownership_percentage ??
+        100
+      )
+    );
+
+    setTransferDate(
+      new Date()
+        .toISOString()
+        .slice(0, 10)
+    );
+
+    setShowTransferForm(true);
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | TRANSFER PROPERTY OWNERSHIP
+  |--------------------------------------------------------------------------
+  */
+
+  async function transferPropertyOwnership() {
+    if (!selectedUnit) {
+      return;
+    }
+
+    const cleanName =
+      transferOwnerName.trim();
+
+    const cleanContact =
+      transferOwnerContact.trim();
+
+    const percentage =
+      Number(
+        transferOwnershipPercentage
+      );
+
+    if (!cleanName) {
+      setError(
+        "Please enter the new owner's full name."
+      );
+      return;
+    }
+
+    if (
+      !Number.isFinite(percentage) ||
+      percentage <= 0 ||
+      percentage > 100
+    ) {
+      setError(
+        "Ownership percentage must be between 0 and 100."
+      );
+      return;
+    }
+
+    try {
+      setIsTransferring(true);
+      setError("");
+      setSuccessMessage("");
+
+      const token =
+        getAuthToken();
+
+      if (!token) {
+        throw new Error(
+          "Authentication token not found."
+        );
+      }
+
+      const response =
+        await fetch(
+          `${API_BASE_URL}/property-units/transfer`,
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              Authorization:
+                `Bearer ${token}`,
+            },
+
+            body: JSON.stringify({
+              property_unit_id:
+                selectedUnit.id,
+
+              new_owner_name:
+                cleanName,
+
+              new_owner_contact:
+                cleanContact ||
+                null,
+
+              ownership_percentage:
+                percentage,
+
+              transfer_date:
+                transferDate,
+            }),
+          }
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+          "Ownership transfer failed."
+        );
+      }
+
+      /*
+       * Update current owner immediately.
+       */
+
+      setPropertyOwners(
+        (current) => ({
+          ...current,
+
+          [selectedUnit.id]: {
+            name:
+              data.current_owner.name,
+
+            contact:
+              data.current_owner.contact,
+
+            ownership_percentage:
+              Number(
+                data.current_owner
+                  .ownership_percentage
+              ),
+          },
+        })
+      );
+
+      /*
+       * Update ownership history
+       * returned by the API.
+       */
+
+      const history: OwnershipHistoryRecord[] =
+        [
+          ...(
+            data.previous_owners ??
+            []
+          ).map(
+            (
+              owner: {
+                id: string;
+                owner_id?: string;
+                name: string;
+                contact: string | null;
+                ownership_percentage: number;
+                valid_from: string;
+                valid_to: string;
+              }
+            ) => ({
+              id: owner.id,
+              owner_id:
+                owner.owner_id ?? owner.id,
+              name:
+                owner.name,
+              contact:
+                owner.contact,
+              ownership_percentage:
+                Number(
+                  owner.ownership_percentage
+                ),
+              valid_from:
+                owner.valid_from,
+              valid_to:
+                owner.valid_to,
+              is_current: false,
+            })
+          ),
+
+          ...(data.current_owner
+            ? [
+              {
+                id:
+                  data.current_owner.id,
+                owner_id:
+                  data.current_owner.owner_id ??
+                  data.current_owner.id,
+                name:
+                  data.current_owner.name,
+                contact:
+                  data.current_owner
+                    .contact,
+                ownership_percentage:
+                  Number(
+                    data.current_owner
+                      .ownership_percentage
+                  ),
+                valid_from:
+                  data.current_owner
+                    .valid_from,
+                valid_to: null,
+                is_current: true,
+              },
+            ]
+            : []),
+        ];
+
+      setOwnershipHistory(
+        history
+      );
+
+      setShowTransferForm(false);
+
+      setSuccessMessage(
+        `Ownership of apartment ${selectedUnit.unit_number} has been transferred to ${data.current_owner.name}.`
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Ownership transfer failed."
+      );
+    } finally {
+      setIsTransferring(false);
     }
   }
 
@@ -1177,7 +1520,7 @@ function EditExistingBuilding() {
               ...styles.floorButton,
 
               ...(selectedFloor ===
-              null
+                null
                 ? styles.floorButtonActive
                 : {}),
             }}
@@ -1199,7 +1542,7 @@ function EditExistingBuilding() {
                   ...styles.floorButton,
 
                   ...(selectedFloor ===
-                  floor
+                    floor
                     ? styles.floorButtonActive
                     : {}),
                 }}
@@ -1281,7 +1624,7 @@ function EditExistingBuilding() {
 
                 const owner =
                   propertyOwners[
-                    unit.id
+                  unit.id
                   ];
 
                 const active =
@@ -1327,7 +1670,7 @@ function EditExistingBuilding() {
                           ...styles.statusBadge,
 
                           ...(status ===
-                          "REGISTERED"
+                            "REGISTERED"
                             ? styles.statusRegistered
                             : styles.statusUnregistered),
                         }}
@@ -1457,7 +1800,7 @@ function EditExistingBuilding() {
                 ...(getRegistryStatus(
                   selectedUnit
                 ) ===
-                "REGISTERED"
+                  "REGISTERED"
                   ? styles.statusRegistered
                   : styles.statusUnregistered),
               }}
@@ -1519,58 +1862,58 @@ function EditExistingBuilding() {
             selectedUnit
           ) ===
             "UNREGISTERED" && (
-            <div
-              style={
-                styles.registrationBox
-              }
-            >
               <div
                 style={
-                  styles.registrationIcon
+                  styles.registrationBox
                 }
               >
-                📜
-              </div>
-
-              <div
-                style={
-                  styles.registrationContent
-                }
-              >
-                <h3
+                <div
                   style={
-                    styles.registrationTitle
+                    styles.registrationIcon
                   }
                 >
-                  Property not registered
-                </h3>
+                  📜
+                </div>
 
-                <p
+                <div
                   style={
-                    styles.registrationText
+                    styles.registrationContent
                   }
                 >
-                  This apartment exists
-                  in the 3D cadastral
-                  model but does not
-                  yet have a registered
-                  owner.
-                </p>
-              </div>
+                  <h3
+                    style={
+                      styles.registrationTitle
+                    }
+                  >
+                    Property not registered
+                  </h3>
 
-              <button
-                type="button"
-                style={
-                  styles.primaryButton
-                }
-                onClick={
-                  openRegistrationForm
-                }
-              >
-                REGISTER PROPERTY →
-              </button>
-            </div>
-          )}
+                  <p
+                    style={
+                      styles.registrationText
+                    }
+                  >
+                    This apartment exists
+                    in the 3D cadastral
+                    model but does not
+                    yet have a registered
+                    owner.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  style={
+                    styles.primaryButton
+                  }
+                  onClick={
+                    openRegistrationForm
+                  }
+                >
+                  REGISTER PROPERTY →
+                </button>
+              </div>
+            )}
 
           {/* REGISTERED */}
 
@@ -1579,7 +1922,7 @@ function EditExistingBuilding() {
           ) ===
             "REGISTERED" &&
             propertyOwners[
-              selectedUnit.id
+            selectedUnit.id
             ] && (
               <div
                 style={
@@ -1632,21 +1975,197 @@ function EditExistingBuilding() {
                   </p>
                 </div>
 
-                <button
-                  type="button"
+                <div
                   style={
-                    styles.secondaryButton
-                  }
-                  onClick={() =>
-                    window.alert(
-                      "Ownership transfer will be connected in the next milestone."
-                    )
+                    styles.ownerActions
                   }
                 >
-                  TRANSFER OWNERSHIP →
-                </button>
+                  <button
+                    type="button"
+                    style={
+                      styles.secondaryButton
+                    }
+                    onClick={
+                      openTransferForm
+                    }
+                  >
+                    TRANSFER OWNERSHIP →
+                  </button>
+
+                  <button
+                    type="button"
+                    style={
+                      styles.historyButton
+                    }
+                    onClick={
+                      loadOwnershipHistory
+                    }
+                    disabled={
+                      isLoadingHistory
+                    }
+                  >
+                    {isLoadingHistory
+                      ? "LOADING..."
+                      : "VIEW HISTORY"}
+                  </button>
+                </div>
               </div>
             )}
+
+          {ownershipHistory.length > 0 && (
+            <div
+              style={
+                styles.historyPanel
+              }
+            >
+              <div
+                style={
+                  styles.historyHeader
+                }
+              >
+                <div>
+                  <div
+                    style={
+                      styles.historyEyebrow
+                    }
+                  >
+                    OWNERSHIP RECORD
+                  </div>
+                  <h3
+                    style={
+                      styles.historyTitle
+                    }
+                  >
+                    Ownership History
+                  </h3>
+                </div>
+
+                <span
+                  style={
+                    styles.historyCount
+                  }
+                >
+                  {ownershipHistory.length} RECORDS
+                </span>
+              </div>
+
+              <div
+                style={
+                  styles.historyTimeline
+                }
+              >
+                {ownershipHistory
+                  .slice()
+                  .reverse()
+                  .map(
+                    (record, index) => (
+                      <div
+                        key={
+                          record.id
+                        }
+                        style={
+                          styles.historyItem
+                        }
+                      >
+                        <div
+                          style={
+                            styles.historyMarkerColumn
+                          }
+                        >
+                          <div
+                            style={{
+                              ...styles.historyMarker,
+                              ...(record.is_current
+                                ? styles.historyMarkerCurrent
+                                : {}),
+                            }}
+                          >
+                            {record.is_current
+                              ? "✓"
+                              : index + 1}
+                          </div>
+
+                          {index <
+                            ownershipHistory.length - 1 && (
+                            <div
+                              style={
+                                styles.historyLine
+                              }
+                            />
+                          )}
+                        </div>
+
+                        <div
+                          style={
+                            styles.historyContent
+                          }
+                        >
+                          <div
+                            style={
+                              styles.historyOwnerRow
+                            }
+                          >
+                            <strong
+                              style={
+                                styles.historyOwnerName
+                              }
+                            >
+                              {record.name}
+                            </strong>
+
+                            {record.is_current && (
+                              <span
+                                style={
+                                  styles.currentOwnerBadge
+                                }
+                              >
+                                CURRENT OWNER
+                              </span>
+                            )}
+                          </div>
+
+                          <div
+                            style={
+                              styles.historyMeta
+                            }
+                          >
+                            <span>
+                              {record.ownership_percentage}% ownership
+                            </span>
+
+                            {record.contact && (
+                              <span>
+                                {record.contact}
+                              </span>
+                            )}
+                          </div>
+
+                          <div
+                            style={
+                              styles.historyDates
+                            }
+                          >
+                            <span>
+                              {formatOwnershipDate(
+                                record.valid_from
+                              )}
+                            </span>
+                            <span>→</span>
+                            <span>
+                              {record.valid_to
+                                ? formatOwnershipDate(
+                                    record.valid_to
+                                  )
+                                : "Present"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  )}
+              </div>
+            </div>
+          )}
 
           <div
             style={
@@ -1961,7 +2480,296 @@ function EditExistingBuilding() {
               </div>
             </div>
           </div>
+
+
+        )} 
+      {/* TRANSFER OWNERSHIP MODAL */}
+
+      {showTransferForm &&
+        selectedUnit && (
+          <div
+            style={
+              styles.modalOverlay
+            }
+          >
+            <div
+              style={
+                styles.modal
+              }
+            >
+              <div
+                style={
+                  styles.modalHeader
+                }
+              >
+                <div>
+                  <div
+                    style={
+                      styles.modalEyebrow
+                    }
+                  >
+                    OWNERSHIP TRANSFER
+                  </div>
+
+                  <h2
+                    style={
+                      styles.modalTitle
+                    }
+                  >
+                    Transfer Apartment{" "}
+                    {
+                      selectedUnit.unit_number
+                    }
+                  </h2>
+
+                  <p
+                    style={
+                      styles.modalSubtitle
+                    }
+                  >
+                    {
+                      selectedUnit.vertical_property_id
+                    }
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowTransferForm(false)
+                  }
+                  style={
+                    styles.closeButton
+                  }
+                >
+                  ×
+                </button>
+              </div>
+
+              <div
+                style={
+                  styles.modalBody
+                }
+              >
+                <div
+                  style={
+                    styles.currentOwnerBox
+                  }
+                >
+                  <div
+                    style={
+                      styles.currentOwnerIcon
+                    }
+                  >
+                    👤
+                  </div>
+
+                  <div>
+                    <span
+                      style={
+                        styles.currentOwnerLabel
+                      }
+                    >
+                      CURRENT OWNER
+                    </span>
+
+                    <strong
+                      style={
+                        styles.currentOwnerName
+                      }
+                    >
+                      {
+                        propertyOwners[
+                          selectedUnit.id
+                        ]?.name
+                      }
+                    </strong>
+
+                    <span
+                      style={
+                        styles.currentOwnerContact
+                      }
+                    >
+                      {
+                        propertyOwners[
+                          selectedUnit.id
+                        ]?.contact ??
+                        "No contact recorded"
+                      }
+                    </span>
+                  </div>
+                </div>
+
+                <div
+                  style={
+                    styles.transferArrow
+                  }
+                >
+                  ↓
+                  <span>
+                    NEW REGISTERED OWNER
+                  </span>
+                </div>
+
+                <label
+                  style={
+                    styles.formLabel
+                  }
+                >
+                  New Owner Full Name
+                  <input
+                    type="text"
+                    value={
+                      transferOwnerName
+                    }
+                    onChange={(event) =>
+                      setTransferOwnerName(
+                        event.target.value
+                      )
+                    }
+                    placeholder="Enter new owner's full name"
+                    style={
+                      styles.formInput
+                    }
+                    autoFocus
+                  />
+                </label>
+
+                <label
+                  style={
+                    styles.formLabel
+                  }
+                >
+                  New Owner Contact
+                  <input
+                    type="text"
+                    value={
+                      transferOwnerContact
+                    }
+                    onChange={(event) =>
+                      setTransferOwnerContact(
+                        event.target.value
+                      )
+                    }
+                    placeholder="Enter phone number"
+                    style={
+                      styles.formInput
+                    }
+                  />
+                </label>
+
+                <div
+                  style={
+                    styles.formRow
+                  }
+                >
+                  <label
+                    style={
+                      styles.formLabel
+                    }
+                  >
+                    Ownership %
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={
+                        transferOwnershipPercentage
+                      }
+                      onChange={(event) =>
+                        setTransferOwnershipPercentage(
+                          event.target.value
+                        )
+                      }
+                      style={
+                        styles.formInput
+                      }
+                    />
+                  </label>
+
+                  <label
+                    style={
+                      styles.formLabel
+                    }
+                  >
+                    Transfer Date
+                    <input
+                      type="date"
+                      value={
+                        transferDate
+                      }
+                      onChange={(event) =>
+                        setTransferDate(
+                          event.target.value
+                        )
+                      }
+                      style={
+                        styles.formInput
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div
+                  style={
+                    styles.transferNotice
+                  }
+                >
+                  <strong>
+                    Ownership history is preserved
+                  </strong>
+
+                  <span>
+                    The previous owner's record
+                    remains in the registry.
+                    Only the active ownership
+                    relationship changes. The
+                    VPID remains unchanged.
+                  </span>
+                </div>
+              </div>
+
+              <div
+                style={
+                  styles.modalFooter
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowTransferForm(false)
+                  }
+                  style={
+                    styles.cancelButton
+                  }
+                  disabled={
+                    isTransferring
+                  }
+                >
+                  CANCEL
+                </button>
+
+                <button
+                  type="button"
+                  onClick={
+                    transferPropertyOwnership
+                  }
+                  style={
+                    styles.primaryButton
+                  }
+                  disabled={
+                    isTransferring
+                  }
+                >
+                  {isTransferring
+                    ? "TRANSFERRING..."
+                    : "CONFIRM TRANSFER →"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
+
     </div>
   );
 }
@@ -1971,6 +2779,26 @@ function EditExistingBuilding() {
 | INFO BOX
 |--------------------------------------------------------------------------
 */
+
+function formatOwnershipDate(
+  value: string
+) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(
+    "en-IN",
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      timeZone: "Asia/Kolkata",
+    }
+  ).format(date);
+}
 
 function InfoBox({
   label,
@@ -2638,6 +3466,216 @@ const styles: Record<
       "pointer",
     whiteSpace:
       "nowrap",
+  },
+
+  ownerActions: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "7px",
+    flexShrink: 0,
+  },
+
+  historyButton: {
+    padding: "9px 12px",
+    border: "1px solid #475569",
+    borderRadius: "9px",
+    background: "transparent",
+    color: "#cbd5e1",
+    fontSize: "9px",
+    fontWeight: 900,
+    letterSpacing: "0.4px",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+
+  historyPanel: {
+    marginTop: "18px",
+    padding: "18px",
+    border: "1px solid rgba(255,255,255,0.10)",
+    borderRadius: "14px",
+    background: "rgba(255,255,255,0.035)",
+  },
+
+  historyHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    marginBottom: "15px",
+  },
+
+  historyEyebrow: {
+    fontSize: "8px",
+    fontWeight: 900,
+    letterSpacing: "1.1px",
+    color: "#93c5fd",
+  },
+
+  historyTitle: {
+    margin: "4px 0 0 0",
+    fontSize: "15px",
+  },
+
+  historyCount: {
+    padding: "5px 8px",
+    borderRadius: "999px",
+    background: "rgba(37,99,235,0.16)",
+    color: "#93c5fd",
+    fontSize: "8px",
+    fontWeight: 900,
+  },
+
+  historyTimeline: {
+    display: "flex",
+    flexDirection: "column",
+  },
+
+  historyItem: {
+    display: "flex",
+    gap: "12px",
+  },
+
+  historyMarkerColumn: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    width: "25px",
+    flexShrink: 0,
+  },
+
+  historyMarker: {
+    width: "23px",
+    height: "23px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "50%",
+    background: "#334155",
+    color: "#cbd5e1",
+    fontSize: "8px",
+    fontWeight: 900,
+  },
+
+  historyMarkerCurrent: {
+    background: "#16a34a",
+    color: "#ffffff",
+  },
+
+  historyLine: {
+    width: "1px",
+    flex: 1,
+    minHeight: "32px",
+    background: "rgba(148,163,184,0.25)",
+  },
+
+  historyContent: {
+    flex: 1,
+    paddingBottom: "18px",
+  },
+
+  historyOwnerRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    flexWrap: "wrap",
+  },
+
+  historyOwnerName: {
+    fontSize: "12px",
+  },
+
+  currentOwnerBadge: {
+    padding: "3px 6px",
+    borderRadius: "999px",
+    background: "rgba(34,197,94,0.15)",
+    color: "#86efac",
+    fontSize: "7px",
+    fontWeight: 900,
+  },
+
+  historyMeta: {
+    display: "flex",
+    gap: "12px",
+    marginTop: "4px",
+    color: "#94a3b8",
+    fontSize: "9px",
+  },
+
+  historyDates: {
+    display: "flex",
+    gap: "7px",
+    marginTop: "7px",
+    color: "#cbd5e1",
+    fontSize: "9px",
+    fontWeight: 700,
+  },
+
+  currentOwnerBox: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    padding: "14px",
+    marginBottom: "12px",
+    borderRadius: "11px",
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+  },
+
+  currentOwnerIcon: {
+    width: "38px",
+    height: "38px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "10px",
+    background: "#eff6ff",
+    fontSize: "18px",
+  },
+
+  currentOwnerLabel: {
+    display: "block",
+    fontSize: "8px",
+    fontWeight: 900,
+    color: "#64748b",
+  },
+
+  currentOwnerName: {
+    display: "block",
+    marginTop: "3px",
+    fontSize: "13px",
+    color: "#172033",
+  },
+
+  currentOwnerContact: {
+    display: "block",
+    marginTop: "2px",
+    fontSize: "9px",
+    color: "#64748b",
+  },
+
+  transferArrow: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "2px",
+    margin: "2px 0 12px",
+    color: "#2563eb",
+    fontSize: "20px",
+    fontWeight: 900,
+  },
+
+  transferNotice: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "5px",
+    marginTop: "4px",
+    padding: "12px",
+    borderRadius: "9px",
+    background: "#fff7ed",
+    border: "1px solid #fed7aa",
+    color: "#9a3412",
+    fontSize: "10px",
+    lineHeight: 1.5,
   },
 
   futureFeatures: {

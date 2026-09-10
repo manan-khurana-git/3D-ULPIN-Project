@@ -6,6 +6,7 @@ import parcelRoutes from "./routes/parcelRoutes.js";
 import buildingRoutes from "./routes/buildingRoutes.js";
 import propertyUnitRoutes from "./routes/propertyUnitRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
+import propertyRegistrationRoutes from "./routes/propertyRegistrationRoutes.js";
 
 dotenv.config();
 
@@ -19,6 +20,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/parcels", parcelRoutes);
 app.use("/api/buildings", buildingRoutes);
 app.use("/api/property-units", propertyUnitRoutes);
+app.use("/api/property-registrations",propertyRegistrationRoutes);
 
 app.get("/api/health", (_req, res) => {
   res.json({

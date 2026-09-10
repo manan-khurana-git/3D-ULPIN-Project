@@ -1,6 +1,10 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+} from "react-router-dom";
+
 import {
   registerUser,
   saveAuthData,
@@ -9,14 +13,26 @@ import {
 function Register() {
   const navigate = useNavigate();
 
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [name, setName] =
+    useState("");
+
+  const [email, setEmail] =
+    useState("");
+
+  const [password, setPassword] =
+    useState("");
+
   const [confirmPassword, setConfirmPassword] =
     useState("");
 
   const [role, setRole] =
     useState("CITIZEN");
+
+  const [governmentId, setGovernmentId] =
+    useState("");
+
+  const [verificationCode, setVerificationCode] =
+    useState("");
 
   const [isLoading, setIsLoading] =
     useState(false);
@@ -31,8 +47,23 @@ function Register() {
 
     setError("");
 
+    /*
+     * ---------------------------------------------------------------
+     * BASIC VALIDATION
+     * ---------------------------------------------------------------
+     */
+
     if (!name.trim()) {
-      setError("Please enter your full name.");
+      setError(
+        "Please enter your full name."
+      );
+      return;
+    }
+
+    if (!email.trim()) {
+      setError(
+        "Please enter your email address."
+      );
       return;
     }
 
@@ -43,20 +74,60 @@ function Register() {
       return;
     }
 
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
+    if (
+      password !== confirmPassword
+    ) {
+      setError(
+        "Passwords do not match."
+      );
       return;
+    }
+
+    /*
+     * ---------------------------------------------------------------
+     * GOVERNMENT OFFICER VALIDATION
+     * ---------------------------------------------------------------
+     */
+
+    if (
+      role ===
+      "GOVERNMENT_OFFICER"
+    ) {
+      if (!governmentId.trim()) {
+        setError(
+          "Government ID is required for Government Officer registration."
+        );
+        return;
+      }
+
+      if (
+        !verificationCode.trim()
+      ) {
+        setError(
+          "Government verification code is required."
+        );
+        return;
+      }
     }
 
     setIsLoading(true);
 
     try {
-      const response = await registerUser(
-        name.trim(),
-        email.trim(),
-        password,
-        role
-      );
+      const response =
+        await registerUser(
+          name.trim(),
+          email.trim(),
+          password,
+          role,
+          role ===
+            "GOVERNMENT_OFFICER"
+            ? governmentId.trim()
+            : undefined,
+          role ===
+            "GOVERNMENT_OFFICER"
+            ? verificationCode.trim()
+            : undefined
+        );
 
       saveAuthData(
         response.token,
@@ -75,6 +146,28 @@ function Register() {
     }
   }
 
+  function handleRoleChange(
+    value: string
+  ) {
+    setRole(value);
+
+    /*
+     * Clear officer credentials
+     * when switching away from
+     * Government Officer.
+     */
+
+    if (
+      value !==
+      "GOVERNMENT_OFFICER"
+    ) {
+      setGovernmentId("");
+      setVerificationCode("");
+    }
+
+    setError("");
+  }
+
   return (
     <div className="auth-page">
       <div className="auth-card">
@@ -87,6 +180,7 @@ function Register() {
 
           <div>
             <h1>3D ULPIN</h1>
+
             <p>
               Digital Cadastral Platform
             </p>
@@ -100,12 +194,14 @@ function Register() {
           </h2>
 
           <p>
-            Register to access the 3D
-            property platform.
+            Register to access the
+            3D property platform.
           </p>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form
+          onSubmit={handleSubmit}
+        >
 
           {/* Full Name */}
           <label
@@ -122,7 +218,9 @@ function Register() {
             placeholder="Your full name"
             value={name}
             onChange={(event) =>
-              setName(event.target.value)
+              setName(
+                event.target.value
+              )
             }
             required
           />
@@ -142,7 +240,9 @@ function Register() {
             placeholder="you@example.com"
             value={email}
             onChange={(event) =>
-              setEmail(event.target.value)
+              setEmail(
+                event.target.value
+              )
             }
             required
           />
@@ -160,7 +260,9 @@ function Register() {
             className="auth-input"
             value={role}
             onChange={(event) =>
-              setRole(event.target.value)
+              handleRoleChange(
+                event.target.value
+              )
             }
           >
             <option value="CITIZEN">
@@ -175,6 +277,96 @@ function Register() {
               Government Officer
             </option>
           </select>
+
+          {/* Government Officer Verification */}
+          {role ===
+            "GOVERNMENT_OFFICER" && (
+            <div
+              className="government-verification"
+            >
+
+              <div className="government-verification-header">
+                <span className="government-verification-icon">
+                  🛡
+                </span>
+
+                <div>
+                  <strong>
+                    Government verification
+                  </strong>
+
+                  <p>
+                    Valid government
+                    credentials are
+                    required.
+                  </p>
+                </div>
+              </div>
+
+              {/* Government ID */}
+              <label
+                className="auth-label"
+                htmlFor="government-id"
+              >
+                Government ID
+              </label>
+
+              <input
+                id="government-id"
+                className="auth-input"
+                type="text"
+                placeholder="Enter your government ID"
+                value={
+                  governmentId
+                }
+                onChange={(
+                  event
+                ) =>
+                  setGovernmentId(
+                    event.target
+                      .value
+                  )
+                }
+                required
+              />
+
+              {/* Verification Code */}
+              <label
+                className="auth-label"
+                htmlFor="verification-code"
+              >
+                Verification code
+              </label>
+
+              <input
+                id="verification-code"
+                className="auth-input"
+                type="password"
+                placeholder="Enter verification code"
+                value={
+                  verificationCode
+                }
+                onChange={(
+                  event
+                ) =>
+                  setVerificationCode(
+                    event.target
+                      .value
+                  )
+                }
+                required
+              />
+
+              <div className="government-verification-note">
+                Your Government ID and
+                verification credentials
+                will be validated against
+                the authorized government
+                registry.
+              </div>
+
+            </div>
+          )}
 
           {/* Password */}
           <label
@@ -191,7 +383,9 @@ function Register() {
             placeholder="Minimum 8 characters"
             value={password}
             onChange={(event) =>
-              setPassword(event.target.value)
+              setPassword(
+                event.target.value
+              )
             }
             required
           />
@@ -209,7 +403,9 @@ function Register() {
             className="auth-input"
             type="password"
             placeholder="Repeat your password"
-            value={confirmPassword}
+            value={
+              confirmPassword
+            }
             onChange={(event) =>
               setConfirmPassword(
                 event.target.value
@@ -232,7 +428,7 @@ function Register() {
             disabled={isLoading}
           >
             {isLoading
-              ? "Creating account..."
+              ? "Verifying & Creating..."
               : "Create Account"}
           </button>
 
