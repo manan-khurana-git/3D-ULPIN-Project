@@ -76,6 +76,87 @@ router.get(
 
 /*
 |--------------------------------------------------------------------------
+| GET AVAILABLE PROPERTY UNITS
+| GET /api/property-units/available
+|--------------------------------------------------------------------------
+|
+| Returns property units that currently have no active owner.
+| These properties can be submitted for citizen registration.
+|
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  "/available",
+  authenticateToken,
+  requireRole(
+    "CITIZEN",
+    "GOVERNMENT_OFFICER"),
+  async (_req, res) => {
+    try {
+      const result = await pool.query(`
+        SELECT
+          pu.id,
+          pu.floor_id,
+          pu.unit_number,
+          pu.parent_ulpin,
+          pu.vertical_property_id,
+          pu.area_sq_m,
+          pu.min_z,
+          pu.max_z,
+
+          f.floor_number,
+          f.floor_label,
+
+          b.id AS building_id,
+          b.building_name,
+
+          p.parcel_number
+
+        FROM property_units pu
+
+        INNER JOIN floors f
+          ON f.id = pu.floor_id
+
+        INNER JOIN buildings b
+          ON b.id = f.building_id
+
+        INNER JOIN parcels p
+          ON p.id = b.parcel_id
+
+        LEFT JOIN property_ownership po
+          ON po.property_unit_id = pu.id
+          AND po.valid_to IS NULL
+
+        WHERE po.id IS NULL
+
+        ORDER BY
+          b.building_name,
+          f.floor_number,
+          pu.unit_number
+      `);
+
+      return res.json({
+        status: "ok",
+        property_units: result.rows,
+      });
+    } catch (error) {
+      console.error(
+        "Available property unit list error:",
+        error
+      );
+
+      return res.status(500).json({
+        status: "error",
+        message:
+          "Failed to fetch available property units",
+      });
+    }
+  }
+);
+
+/*
+|--------------------------------------------------------------------------
 | GENERATE PROPERTY UNITS
 | POST /api/property-units/generate
 |--------------------------------------------------------------------------

@@ -4,7 +4,10 @@ import {
   useState,
 } from "react";
 
+import { useNavigate } from "react-router-dom";
+
 import {
+  clearAuthData,
   getAuthToken,
   getAuthUser,
 } from "../services/authService";
@@ -74,6 +77,8 @@ const API_BASE_URL =
   "http://localhost:5000/api";
 
 function GovernmentOfficerDashboard() {
+  const navigate = useNavigate();
+
   const user = getAuthUser();
   const token = getAuthToken();
 
@@ -177,6 +182,18 @@ function GovernmentOfficerDashboard() {
     }
   }
 
+    /*
+  |--------------------------------------------------------------------------
+  | LOGOUT
+  |--------------------------------------------------------------------------
+  */
+
+  function handleLogout() {
+    clearAuthData();
+    navigate("/login", {
+      replace: true,
+    });
+  }
   /*
   |--------------------------------------------------------------------------
   | INITIAL LOAD
@@ -550,7 +567,7 @@ function GovernmentOfficerDashboard() {
           </p>
         </div>
 
-        <div className="gov-officer-card">
+                <div className="gov-officer-card">
 
           <div className="gov-officer-avatar">
             {(user?.name ||
@@ -559,7 +576,7 @@ function GovernmentOfficerDashboard() {
               .toUpperCase()}
           </div>
 
-          <div>
+          <div className="gov-officer-info">
             <strong>
               {user?.name ||
                 "Government Officer"}
@@ -569,6 +586,28 @@ function GovernmentOfficerDashboard() {
               Government Officer
             </span>
           </div>
+
+          <button
+            type="button"
+            className="gov-logout-button"
+            onClick={handleLogout}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                d="M10 5H6.5A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19H10M14 8l4 4-4 4M18 12H9"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.8"
+              />
+            </svg>
+
+            Logout
+          </button>
 
         </div>
 

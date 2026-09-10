@@ -84,6 +84,27 @@ type CitizenRegistrationResponse = {
     registrations: CitizenRegistration[];
 };
 
+type AvailablePropertyUnit = {
+    id: string;
+    floor_id: string;
+    unit_number: string;
+    parent_ulpin: string;
+    vertical_property_id: string;
+    area_sq_m: string | number;
+    min_z: string | number;
+    max_z: string | number;
+    floor_number: number;
+    floor_label: string;
+    building_id: string;
+    building_name: string;
+    parcel_number: string;
+};
+
+type AvailablePropertyResponse = {
+    status: string;
+    property_units: AvailablePropertyUnit[];
+};
+
 const API_BASE_URL = "http://localhost:5000/api";
 
 function formatDate(value: string | null) {
@@ -300,6 +321,29 @@ function CitizenDashboard() {
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [error, setError] = useState("");
 
+    const [availableProperties, setAvailableProperties] =
+        useState<AvailablePropertyUnit[]>([]);
+
+    const [isLoadingAvailable, setIsLoadingAvailable] =
+        useState(false);
+
+    const [showAllAvailableProperties, setShowAllAvailableProperties] =
+        useState(false);
+
+    const [selectedAvailableProperty, setSelectedAvailableProperty] =
+        useState<AvailablePropertyUnit | null>(null);
+
+    const [ownerContact, setOwnerContact] = useState("");
+
+    const [ownershipPercentage, setOwnershipPercentage] =
+        useState("100");
+
+    const [registrationError, setRegistrationError] =
+        useState("");
+
+    const [isSubmittingRegistration, setIsSubmittingRegistration] =
+        useState(false);
+
     const loadRegistrations = useCallback(
         async (showRefreshing = false) => {
             const token = getAuthToken();
@@ -386,6 +430,209 @@ function CitizenDashboard() {
         [navigate]
     );
 
+    const loadAvailableProperties = useCallback(async () => {
+        const token = getAuthToken();
+
+        if (!token) {
+            clearAuthData();
+            navigate("/login", { replace: true });
+            return;
+        }
+
+        setIsLoadingAvailable(true);
+        setError("");
+
+        try {
+            const response = await fetch(
+                `${API_BASE_URL}/property-units/available`,
+                {
+                    method: "GET",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                }
+            );
+
+            const data =
+                (await response.json()) as
+                    | AvailablePropertyResponse
+                    | {
+                          message?: string;
+                      };
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    clearAuthData();
+                    navigate("/login", {
+                        replace: true,
+                    });
+                    return;
+                }
+
+                if (response.status === 403) {
+                    throw new Error(
+                        "Only citizen accounts can view available properties."
+                    );
+                }
+
+                throw new Error(
+                    "message" in data && data.message
+                        ? data.message
+                        : "Failed to load available properties"
+                );
+            }
+
+            const successData =
+                data as AvailablePropertyResponse;
+
+            setAvailableProperties(
+                successData.property_units ?? []
+            );
+            setShowAllAvailableProperties(false);
+        } catch (requestError) {
+            console.error(
+                "Available property loading error:",
+                requestError
+            );
+
+            setError(
+                requestError instanceof Error
+                    ? requestError.message
+                    : "Failed to load available properties"
+            );
+        } finally {
+            setIsLoadingAvailable(false);
+        }
+    }, [navigate]);
+
+    const openRegistrationForm = (
+        property: AvailablePropertyUnit
+    ) => {
+        setSelectedAvailableProperty(property);
+        setOwnerContact("");
+        setOwnershipPercentage("100");
+        setRegistrationError("");
+    };
+
+    const closeRegistrationForm = () => {
+        if (isSubmittingRegistration) {
+            return;
+        }
+
+        setSelectedAvailableProperty(null);
+        setOwnerContact("");
+        setOwnershipPercentage("100");
+        setRegistrationError("");
+    };
+
+    const submitRegistration = async () => {
+        const token = getAuthToken();
+        const currentUser = getAuthUser();
+
+        if (!token || !currentUser) {
+            clearAuthData();
+            navigate("/login", { replace: true });
+            return;
+        }
+
+        if (!selectedAvailableProperty) {
+            return;
+        }
+
+        const contact = ownerContact.trim();
+        const percentage = Number(ownershipPercentage);
+
+        if (!contact) {
+            setRegistrationError(
+                "Please enter your contact number."
+            );
+            return;
+        }
+
+        if (!/^[0-9]{10}$/.test(contact)) {
+            setRegistrationError(
+                "Please enter a valid 10-digit contact number."
+            );
+            return;
+        }
+
+        if (
+            !Number.isFinite(percentage) ||
+            percentage <= 0 ||
+            percentage > 100
+        ) {
+            setRegistrationError(
+                "Ownership percentage must be between 0 and 100."
+            );
+            return;
+        }
+
+        setIsSubmittingRegistration(true);
+        setRegistrationError("");
+
+        try {
+            const response = await fetch(
+                `${API_BASE_URL}/property-registrations`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                        property_unit_id:
+                            selectedAvailableProperty.id,
+                        owner_name: currentUser.name,
+                        owner_contact: contact,
+                        ownership_percentage:
+                            percentage,
+                    }),
+                }
+            );
+
+            const data =
+                (await response.json()) as {
+                    message?: string;
+                    registration?: CitizenRegistration;
+                };
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    clearAuthData();
+                    navigate("/login", {
+                        replace: true,
+                    });
+                    return;
+                }
+
+                throw new Error(
+                    data.message ??
+                        "Failed to submit property registration"
+                );
+            }
+
+            closeRegistrationForm();
+
+            await Promise.all([
+                loadRegistrations(true),
+                loadAvailableProperties(),
+            ]);
+        } catch (requestError) {
+            console.error(
+                "Citizen registration submission error:",
+                requestError
+            );
+
+            setRegistrationError(
+                requestError instanceof Error
+                    ? requestError.message
+                    : "Failed to submit property registration"
+            );
+        } finally {
+            setIsSubmittingRegistration(false);
+        }
+    };
+
     useEffect(() => {
         const currentUser = getAuthUser();
 
@@ -402,7 +649,12 @@ function CitizenDashboard() {
         }
 
         void loadRegistrations();
-    }, [loadRegistrations, navigate]);
+        void loadAvailableProperties();
+    }, [
+        loadAvailableProperties,
+        loadRegistrations,
+        navigate,
+    ]);
 
     const filteredRegistrations = useMemo(() => {
         if (filter === "ALL") {
@@ -414,6 +666,17 @@ function CitizenDashboard() {
                 registration.status === filter
         );
     }, [filter, registrations]);
+
+    const visibleAvailableProperties = useMemo(() => {
+        if (showAllAvailableProperties) {
+            return availableProperties;
+        }
+
+        return availableProperties.slice(0, 4);
+    }, [
+        availableProperties,
+        showAllAvailableProperties,
+    ]);
 
     const handleLogout = () => {
         clearAuthData();
@@ -604,6 +867,285 @@ function CitizenDashboard() {
                             <strong>{stats.rejected}</strong>
                         </div>
                     </div>
+                </section>
+
+                <section className="citizen-section">
+                    <div className="citizen-section-header">
+                        <div>
+                            <div className="section-kicker">
+                                PROPERTY REGISTRATION
+                            </div>
+
+                            <h2>
+                                Available Properties
+                            </h2>
+
+                            <p>
+                                Select an unregistered property
+                                unit and submit it for government
+                                verification.
+                            </p>
+                        </div>
+
+                        <button
+                            type="button"
+                            className="refresh-button"
+                            onClick={() =>
+                                void loadAvailableProperties()
+                            }
+                            disabled={isLoadingAvailable}
+                        >
+                            <svg
+                                viewBox="0 0 24 24"
+                                aria-hidden="true"
+                                className={
+                                    isLoadingAvailable
+                                        ? "refresh-spin"
+                                        : ""
+                                }
+                            >
+                                <path
+                                    d="M20 11a8 8 0 0 0-14.7-4.2L4 9M4 5v4h4M4 13a8 8 0 0 0 14.7 4.2L20 15m0 4v-4h-4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth="1.7"
+                                />
+                            </svg>
+                            {isLoadingAvailable
+                                ? "Loading..."
+                                : "Refresh"}
+                        </button>
+                    </div>
+
+                    {isLoadingAvailable ? (
+                        <div className="property-loading">
+                            <div className="loading-spinner" />
+
+                            <span>
+                                Loading available properties...
+                            </span>
+                        </div>
+                    ) : availableProperties.length === 0 ? (
+                        <div className="empty-properties">
+                            <div className="empty-icon">
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    aria-hidden="true"
+                                >
+                                    <path
+                                        d="M4 8.5 12 4l8 4.5v8L12 21l-8-4.5v-8Z"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeLinejoin="round"
+                                        strokeWidth="1.5"
+                                    />
+                                    <path
+                                        d="M4.5 8.8 12 13l7.5-4.2M12 13v8"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeLinejoin="round"
+                                        strokeWidth="1.5"
+                                    />
+                                </svg>
+                            </div>
+
+                            <h3>
+                                No available properties
+                            </h3>
+
+                            <p>
+                                There are currently no unregistered
+                                property units available for
+                                citizen registration.
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="property-grid">
+                            {visibleAvailableProperties.map(
+                                (property) => (
+                                    <article
+                                        key={property.id}
+                                        className="property-card"
+                                    >
+                                        <div className="property-card-top">
+                                            <div className="property-status status-neutral">
+                                                <span className="status-dot" />
+                                                Available
+                                            </div>
+
+                                            <div className="registration-number">
+                                                Unit{" "}
+                                                {property.unit_number}
+                                            </div>
+                                        </div>
+
+                                        <div className="property-main">
+                                            <div className="property-building-icon">
+                                                <svg
+                                                    viewBox="0 0 32 32"
+                                                    aria-hidden="true"
+                                                >
+                                                    <path
+                                                        d="M7 27V7.5L16 4l9 3.5V27"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        strokeLinejoin="round"
+                                                        strokeWidth="1.6"
+                                                    />
+                                                    <path
+                                                        d="M11 10h2M19 10h2M11 15h2M19 15h2M11 20h2M19 20h2M14 27v-4h4v4"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        strokeLinecap="round"
+                                                        strokeWidth="1.5"
+                                                    />
+                                                </svg>
+                                            </div>
+
+                                            <div className="property-title">
+                                                <h3>
+                                                    {
+                                                        property.building_name
+                                                    }
+                                                </h3>
+
+                                                <p>
+                                                    {
+                                                        property.floor_label
+                                                    }{" "}
+                                                    · Unit{" "}
+                                                    {
+                                                        property.unit_number
+                                                    }
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <div className="property-vpid">
+                                            <span>
+                                                VPID
+                                            </span>
+
+                                            <strong>
+                                                {
+                                                    property.vertical_property_id
+                                                }
+                                            </strong>
+                                        </div>
+
+                                        <div className="property-details">
+                                            <div>
+                                                <span>
+                                                    ULPIN
+                                                </span>
+
+                                                <strong>
+                                                    {
+                                                        property.parent_ulpin
+                                                    }
+                                                </strong>
+                                            </div>
+
+                                            <div>
+                                                <span>
+                                                    Floor
+                                                </span>
+
+                                                <strong>
+                                                    {
+                                                        property.floor_number
+                                                    }
+                                                </strong>
+                                            </div>
+
+                                            <div>
+                                                <span>
+                                                    Area
+                                                </span>
+
+                                                <strong>
+                                                    {formatArea(
+                                                        property.area_sq_m
+                                                    )}
+                                                </strong>
+                                            </div>
+
+                                            <div>
+                                                <span>
+                                                    Elevation
+                                                </span>
+
+                                                <strong>
+                                                    {
+                                                        property.min_z
+                                                    }{" "}
+                                                    →{" "}
+                                                    {
+                                                        property.max_z
+                                                    }{" "}
+                                                    m
+                                                </strong>
+                                            </div>
+                                        </div>
+
+                                        <div className="property-card-footer">
+                                            <div className="submitted-info">
+                                                <span>
+                                                    Parcel
+                                                </span>
+
+                                                <strong>
+                                                    {
+                                                        property.parcel_number
+                                                    }
+                                                </strong>
+                                            </div>
+
+                                            <div className="property-actions">
+                                                <button
+                                                    type="button"
+                                                    className="primary-action"
+                                                    onClick={() =>
+                                                        openRegistrationForm(
+                                                            property
+                                                        )
+                                                    }
+                                                >
+                                                    Register Property
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </article>
+                                )
+                            )}
+                        </div>
+                    )}
+
+                    {availableProperties.length > 4 && (
+                        <div
+                            style={{
+                                display: "flex",
+                                justifyContent: "center",
+                                marginTop: "18px",
+                            }}
+                        >
+                            <button
+                                type="button"
+                                className="refresh-button"
+                                onClick={() =>
+                                    setShowAllAvailableProperties(
+                                        (current) => !current
+                                    )
+                                }
+                            >
+                                {showAllAvailableProperties
+                                    ? "Show Less"
+                                    : `Show All ${availableProperties.length} Available Properties`}
+                            </button>
+                        </div>
+                    )}
                 </section>
 
                 <section className="citizen-section">
@@ -1041,6 +1583,296 @@ function CitizenDashboard() {
                     )}
                 </section>
             </main>
+
+            {selectedAvailableProperty && (
+                <div
+                    className="citizen-modal-backdrop"
+                    onMouseDown={(event) => {
+                        if (
+                            event.target ===
+                            event.currentTarget
+                        ) {
+                            closeRegistrationForm();
+                        }
+                    }}
+                >
+                    <div className="citizen-modal">
+                        <div className="citizen-modal-header">
+                            <div>
+                                <div className="section-kicker">
+                                    PROPERTY REGISTRATION
+                                </div>
+
+                                <h2>
+                                    Register Property
+                                </h2>
+
+                                <p>
+                                    {
+                                        selectedAvailableProperty
+                                            .building_name
+                                    }{" "}
+                                    ·{" "}
+                                    {
+                                        selectedAvailableProperty
+                                            .floor_label
+                                    }{" "}
+                                    · Unit{" "}
+                                    {
+                                        selectedAvailableProperty
+                                            .unit_number
+                                    }
+                                </p>
+                            </div>
+
+                            <button
+                                type="button"
+                                className="modal-close"
+                                onClick={closeRegistrationForm}
+                                disabled={
+                                    isSubmittingRegistration
+                                }
+                                aria-label="Close"
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div className="modal-status-row">
+                            <div className="property-status status-neutral">
+                                <span className="status-dot" />
+                                Available for Registration
+                            </div>
+                        </div>
+
+                        <div className="modal-vpid">
+                            <span>
+                                Vertical Property ID
+                            </span>
+
+                            <strong>
+                                {
+                                    selectedAvailableProperty
+                                        .vertical_property_id
+                                }
+                            </strong>
+                        </div>
+
+                        <div className="modal-grid">
+                            <div className="modal-field">
+                                <span>
+                                    Parent ULPIN
+                                </span>
+
+                                <strong>
+                                    {
+                                        selectedAvailableProperty
+                                            .parent_ulpin
+                                    }
+                                </strong>
+                            </div>
+
+                            <div className="modal-field">
+                                <span>
+                                    Property Unit ID
+                                </span>
+
+                                <strong>
+                                    {
+                                        selectedAvailableProperty.id
+                                    }
+                                </strong>
+                            </div>
+
+                            <div className="modal-field">
+                                <span>
+                                    Floor
+                                </span>
+
+                                <strong>
+                                    {
+                                        selectedAvailableProperty
+                                            .floor_label
+                                    }
+                                </strong>
+                            </div>
+
+                            <div className="modal-field">
+                                <span>
+                                    Unit
+                                </span>
+
+                                <strong>
+                                    {
+                                        selectedAvailableProperty
+                                            .unit_number
+                                    }
+                                </strong>
+                            </div>
+
+                            <div className="modal-field">
+                                <span>
+                                    Area
+                                </span>
+
+                                <strong>
+                                    {formatArea(
+                                        selectedAvailableProperty
+                                            .area_sq_m
+                                    )}
+                                </strong>
+                            </div>
+
+                            <div className="modal-field">
+                                <span>
+                                    Vertical Range
+                                </span>
+
+                                <strong>
+                                    {
+                                        selectedAvailableProperty
+                                            .min_z
+                                    }{" "}
+                                    →{" "}
+                                    {
+                                        selectedAvailableProperty
+                                            .max_z
+                                    }{" "}
+                                    m
+                                </strong>
+                            </div>
+                        </div>
+
+                        <div className="modal-section">
+                            <h3>
+                                Applicant Details
+                            </h3>
+
+                            <div className="modal-grid">
+                                <div className="modal-field">
+                                    <label htmlFor="citizen-owner-name">
+                                        Owner Name
+                                    </label>
+
+                                    <input
+                                        id="citizen-owner-name"
+                                        type="text"
+                                        value={
+                                            user?.name ?? ""
+                                        }
+                                        readOnly
+                                    />
+                                </div>
+
+                                <div className="modal-field">
+                                    <label htmlFor="citizen-owner-contact">
+                                        Contact Number
+                                    </label>
+
+                                    <input
+                                        id="citizen-owner-contact"
+                                        type="tel"
+                                        inputMode="numeric"
+                                        maxLength={10}
+                                        value={ownerContact}
+                                        onChange={(event) =>
+                                            setOwnerContact(
+                                                event.target.value.replace(
+                                                    /\D/g,
+                                                    ""
+                                                )
+                                            )
+                                        }
+                                        placeholder="10-digit mobile number"
+                                        disabled={
+                                            isSubmittingRegistration
+                                        }
+                                    />
+                                </div>
+
+                                <div className="modal-field">
+                                    <label htmlFor="citizen-ownership-percentage">
+                                        Ownership Percentage
+                                    </label>
+
+                                    <input
+                                        id="citizen-ownership-percentage"
+                                        type="number"
+                                        min="0.01"
+                                        max="100"
+                                        step="0.01"
+                                        value={
+                                            ownershipPercentage
+                                        }
+                                        onChange={(event) =>
+                                            setOwnershipPercentage(
+                                                event.target.value
+                                            )
+                                        }
+                                        disabled={
+                                            isSubmittingRegistration
+                                        }
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="remarks-box">
+                            <span>
+                                Registration Process
+                            </span>
+
+                            <p>
+                                Your request will be submitted
+                                to a government officer for
+                                verification. Once approved, the
+                                property will receive an official
+                                registration number.
+                            </p>
+                        </div>
+
+                        {registrationError && (
+                            <div className="citizen-error">
+                                <strong>
+                                    Registration failed
+                                </strong>
+
+                                <span>
+                                    {registrationError}
+                                </span>
+                            </div>
+                        )}
+
+                        <div className="citizen-modal-footer">
+                            <button
+                                type="button"
+                                className="secondary-action"
+                                onClick={closeRegistrationForm}
+                                disabled={
+                                    isSubmittingRegistration
+                                }
+                            >
+                                Cancel
+                            </button>
+
+                            <button
+                                type="button"
+                                className="primary-action"
+                                onClick={() =>
+                                    void submitRegistration()
+                                }
+                                disabled={
+                                    isSubmittingRegistration
+                                }
+                            >
+                                {isSubmittingRegistration
+                                    ? "Submitting..."
+                                    : "Submit Registration"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {selectedRegistration && (
                 <div

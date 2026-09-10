@@ -2,11 +2,9 @@
   min-height: 100vh;
   padding: 32px;
   background:
-    radial-gradient(
-      circle at top right,
+    radial-gradient(circle at top right,
       rgba(37, 99, 235, 0.12),
-      transparent 32%
-    ),
+      transparent 32%),
     #0b1220;
   color: #e5e7eb;
 }
@@ -80,6 +78,42 @@
   margin-top: 3px;
   color: #64748b;
   font-size: 11px;
+}
+
+.gov-officer-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.gov-logout-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 8px 11px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #172338;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.gov-logout-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.gov-logout-button:hover {
+  border-color: #ef4444;
+  background: rgba(127, 29, 29, 0.2);
+  color: #fca5a5;
 }
 
 .gov-alert {
@@ -514,8 +548,8 @@
   padding: 0 24px;
 }
 
-.gov-detail-grid > div,
-.gov-submission-grid > div {
+.gov-detail-grid>div,
+.gov-submission-grid>div {
   padding: 13px;
   border: 1px solid #243248;
   border-radius: 10px;
@@ -554,7 +588,7 @@
   letter-spacing: 0.08em;
 }
 
-.gov-section > label {
+.gov-section>label {
   display: block;
   margin-bottom: 8px;
   color: #94a3b8;
@@ -694,6 +728,12 @@
 }
 
 @media (max-width: 700px) {
+
+  .gov-officer-card {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
   .gov-dashboard {
     padding: 18px;
   }
@@ -720,4 +760,10 @@
   .gov-modal-backdrop {
     padding: 10px;
   }
+
+  .gov-officer-card {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
 }
