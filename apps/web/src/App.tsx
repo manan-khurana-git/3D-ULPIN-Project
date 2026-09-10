@@ -342,6 +342,15 @@ function App() {
   const initialCameraSetRef =
     useRef(false);
 
+  /*
+   * VPID deep-link support.
+   *
+   * Citizen Portal opens:
+   * /dashboard?vpid=12345678901236-B05-F01-U101
+   */
+  const deepLinkedVpidRef =
+    useRef<string | null>(null);
+
   /* =======================================================
      STATE
   ======================================================= */
@@ -491,12 +500,6 @@ function App() {
           );
         }
 
-        /*
-         * Use the newest generated building.
-         *
-         * The API returns created_at, so we sort
-         * newest first and display that building.
-         */
         const buildings: Building[] =
           data.buildings;
 
@@ -507,26 +510,83 @@ function App() {
           return;
         }
 
-        const newestBuilding =
-          buildings
-            .slice()
-            .sort(
-              (a, b) =>
-                new Date(
-                  b.created_at ?? ""
-                ).getTime() -
-                new Date(
-                  a.created_at ?? ""
-                ).getTime()
-            )[0];
+        /*
+         * Normally the explorer shows the newest building.
+         *
+         * If the Citizen Portal opened this page with a VPID,
+         * first resolve that VPID to its real building ID.
+         * This is important because multiple buildings can use
+         * the same parent ULPIN and therefore the newest building
+         * is not necessarily the citizen's property.
+         */
+        const requestedVpid =
+          new URLSearchParams(
+            window.location.search
+          )
+            .get("vpid")
+            ?.trim();
+
+        let selectedBuilding: Building | null =
+          null;
+
+        if (requestedVpid) {
+          try {
+            const propertyResponse =
+              await apiFetch(
+                `${API_URL}/property-units/${encodeURIComponent(
+                  requestedVpid
+                )}`
+              );
+
+            if (propertyResponse.ok) {
+              const propertyData =
+                await propertyResponse.json();
+
+              const targetBuildingId =
+                propertyData.property?.building?.id;
+
+              if (targetBuildingId) {
+                selectedBuilding =
+                  buildings.find(
+                    (item) =>
+                      item.id ===
+                      targetBuildingId
+                  ) ?? null;
+              }
+            }
+          } catch (error) {
+            console.warn(
+              "Could not resolve deep-linked VPID to a building:",
+              error
+            );
+          }
+        }
 
         /*
-         * Load complete 3D data for the
-         * selected building.
+         * Fall back to the newest generated building when there
+         * is no VPID or the VPID could not be resolved.
+         */
+        if (!selectedBuilding) {
+          selectedBuilding =
+            buildings
+              .slice()
+              .sort(
+                (a, b) =>
+                  new Date(
+                    b.created_at ?? ""
+                  ).getTime() -
+                  new Date(
+                    a.created_at ?? ""
+                  ).getTime()
+              )[0];
+        }
+
+        /*
+         * Load complete 3D data for the selected building.
          */
         const buildingResponse =
           await apiFetch(
-            `${API_URL}/buildings/${newestBuilding.id}/3d`
+            `${API_URL}/buildings/${selectedBuilding.id}/3d`
           );
 
         if (!buildingResponse.ok) {
@@ -639,6 +699,181 @@ function App() {
     };
 
   /* =======================================================
+     OPEN PROPERTY FROM CITIZEN PORTAL DEEP LINK
+
+     Citizen Portal opens:
+     /dashboard?vpid=12345678901236-B05-F01-U101
+
+     IMPORTANT:
+     This effect only selects the requested property.
+     Camera movement is handled separately after the
+     Cesium unit entity has actually been rendered.
+  ======================================================= */
+
+  useEffect(() => {
+    const requestedVpid =
+      new URLSearchParams(window.location.search)
+        .get("vpid")
+        ?.trim();
+
+    if (!requestedVpid) {
+      deepLinkedVpidRef.current = null;
+      return;
+    }
+
+    if (propertyUnits.length === 0) {
+      return;
+    }
+
+    if (
+      deepLinkedVpidRef.current ===
+      requestedVpid
+    ) {
+      return;
+    }
+
+    const foundUnit =
+      propertyUnits.find(
+        (unit) =>
+          unit.vertical_property_id
+            .toLowerCase() ===
+          requestedVpid.toLowerCase()
+      );
+
+    if (!foundUnit) {
+      console.warn(
+        "Deep-linked VPID was not found:",
+        requestedVpid
+      );
+
+      setApiError(
+        `Property ${requestedVpid} was not found in the loaded 3D data.`
+      );
+
+      deepLinkedVpidRef.current =
+        requestedVpid;
+
+      return;
+    }
+
+    deepLinkedVpidRef.current =
+      requestedVpid;
+
+    console.log(
+      "Opening deep-linked property:",
+      foundUnit.vertical_property_id
+    );
+
+    setApiError("");
+    setSelectedParcel(null);
+    setSelectedUnit(foundUnit);
+    setSelectedFloor(foundUnit.floor_number);
+    setExplodedView(false);
+
+    void loadPropertyDetails(
+      foundUnit.vertical_property_id
+    );
+  }, [
+    propertyUnits,
+  ]);
+
+  /* =======================================================
+     FLY TO DEEP-LINKED PROPERTY
+
+     This runs AFTER selectedUnit changes, which gives the
+     property-unit rendering effect time to create the Cesium
+     entity. It retries briefly because Cesium rendering and
+     React effects can complete in different cycles.
+  ======================================================= */
+
+  useEffect(() => {
+    if (!selectedUnit) {
+      return;
+    }
+
+    const requestedVpid =
+      new URLSearchParams(window.location.search)
+        .get("vpid")
+        ?.trim();
+
+    if (
+      !requestedVpid ||
+      selectedUnit.vertical_property_id.toLowerCase() !==
+        requestedVpid.toLowerCase()
+    ) {
+      return;
+    }
+
+    let attempts = 0;
+    let timeoutId: number | null = null;
+
+    const tryFlyToProperty = () => {
+      const viewer = viewerRef.current;
+
+      if (
+        !viewer ||
+        viewer.isDestroyed()
+      ) {
+        if (attempts < 20) {
+          attempts += 1;
+          timeoutId = window.setTimeout(
+            tryFlyToProperty,
+            150
+          );
+        }
+        return;
+      }
+
+      const entity =
+        viewer.entities.getById(
+          `unit-${selectedUnit.id}`
+        );
+
+      if (entity) {
+        console.log(
+          "Flying to deep-linked property:",
+          selectedUnit.vertical_property_id
+        );
+
+        void viewer.flyTo(
+          entity,
+          {
+            duration: 1.6,
+          }
+        );
+
+        return;
+      }
+
+      if (attempts < 20) {
+        attempts += 1;
+        timeoutId = window.setTimeout(
+          tryFlyToProperty,
+          150
+        );
+      } else {
+        console.warn(
+          "Could not find Cesium entity for VPID:",
+          selectedUnit.vertical_property_id
+        );
+      }
+    };
+
+    timeoutId = window.setTimeout(
+      tryFlyToProperty,
+      150
+    );
+
+    return () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [
+    selectedUnit,
+  ]);
+
+  /* =======================================================
      CREATE CESIUM VIEWER
      
      IMPORTANT:
@@ -660,7 +895,8 @@ function App() {
       new OpenStreetMapImageryProvider(
         {
           url:
-            "https://tile.openstreetmap.org/",
+            "http://localhost:5000/api/map/tiles/",
+            maximumLevel: 19,
         }
       );
 
@@ -2453,7 +2689,7 @@ const handleMenuClick = (
           ================================================= */}
 
           {building && (
-            <div className="explorer-panel">
+            <div className="explorer-panel" style={{ maxHeight: "650px", overflowY: "auto", overflowX: "hidden" }}>
 
               <div className="explorer-title">
                 3D EXPLORER

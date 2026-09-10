@@ -1,6 +1,5 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-
 import {
   BrowserRouter,
   Navigate,
@@ -11,44 +10,37 @@ import {
 import App from "./App";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
-
 import ProtectedRoute from "./ProtectedRoute";
-
 import EditExistingBuilding from "./components/EditExistingBuilding";
-
 import GovernmentOfficerDashboard from "./pages/GovernmentOfficerDashboard";
-
 import CitizenDashboard from "./pages/CitizenDashboard";
-
-import {
-  getAuthUser,
-} from "./services/authService";
-
+import { getAuthUser } from "./services/authService";
 import "./index.css";
-
-/*
-|--------------------------------------------------------------------------
-| ROLE-BASED DASHBOARD ENTRY
-|--------------------------------------------------------------------------
-|
-| The /dashboard route remains the main protected entry point.
-|
-| Government Officers are sent to the government administration dashboard.
-|
-| Citizens, Surveyors and Admins currently continue to the existing
-| 3D ULPIN dashboard until their dedicated dashboards are implemented.
-|
-|--------------------------------------------------------------------------
-*/
 
 function DashboardEntry() {
   const user = getAuthUser();
+
+  /*
+   * Citizen normally lands on the Citizen Property Portal.
+   *
+   * When the Citizen Portal sends:
+   *
+   * /dashboard?vpid=12345678901236-B05-F01-U101
+   *
+   * open the existing Cesium 3D Explorer instead.
+   */
+  const hasVpidDeepLink =
+    new URLSearchParams(window.location.search).has("vpid");
 
   if (user?.role === "GOVERNMENT_OFFICER") {
     return <GovernmentOfficerDashboard />;
   }
 
   if (user?.role === "CITIZEN") {
+    if (hasVpidDeepLink) {
+      return <App />;
+    }
+
     return <CitizenDashboard />;
   }
 
@@ -60,13 +52,7 @@ ReactDOM.createRoot(
 ).render(
   <React.StrictMode>
     <BrowserRouter>
-
       <Routes>
-
-        {/* ============================================================
-            PUBLIC ROUTES
-            ============================================================ */}
-
         <Route
           path="/login"
           element={<Login />}
@@ -77,25 +63,12 @@ ReactDOM.createRoot(
           element={<Register />}
         />
 
-        {/* ============================================================
-            PROTECTED APPLICATION
-            ============================================================ */}
-
-        <Route
-          element={
-            <ProtectedRoute />
-          }
-        >
-
-          {/* Main dashboard */}
+        <Route element={<ProtectedRoute />}>
           <Route
             path="/dashboard"
-            element={
-              <DashboardEntry />
-            }
+            element={<DashboardEntry />}
           />
 
-          {/* Explicit Government Officer dashboard */}
           <Route
             path="/government-dashboard"
             element={
@@ -103,19 +76,13 @@ ReactDOM.createRoot(
             }
           />
 
-          {/* Existing building editor */}
           <Route
             path="/edit-building"
             element={
               <EditExistingBuilding />
             }
           />
-
         </Route>
-
-        {/* ============================================================
-            DEFAULT ROUTE
-            ============================================================ */}
 
         <Route
           path="/"
@@ -127,10 +94,6 @@ ReactDOM.createRoot(
           }
         />
 
-        {/* ============================================================
-            UNKNOWN ROUTES
-            ============================================================ */}
-
         <Route
           path="*"
           element={
@@ -140,9 +103,7 @@ ReactDOM.createRoot(
             />
           }
         />
-
       </Routes>
-
     </BrowserRouter>
   </React.StrictMode>
 );
