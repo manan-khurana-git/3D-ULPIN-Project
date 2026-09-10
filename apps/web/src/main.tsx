@@ -18,6 +18,8 @@ import EditExistingBuilding from "./components/EditExistingBuilding";
 
 import GovernmentOfficerDashboard from "./pages/GovernmentOfficerDashboard";
 
+import CitizenDashboard from "./pages/CitizenDashboard";
+
 import {
   getAuthUser,
 } from "./services/authService";
@@ -42,13 +44,12 @@ import "./index.css";
 function DashboardEntry() {
   const user = getAuthUser();
 
-  if (
-    user?.role ===
-    "GOVERNMENT_OFFICER"
-  ) {
-    return (
-      <GovernmentOfficerDashboard />
-    );
+  if (user?.role === "GOVERNMENT_OFFICER") {
+    return <GovernmentOfficerDashboard />;
+  }
+
+  if (user?.role === "CITIZEN") {
+    return <CitizenDashboard />;
   }
 
   return <App />;
