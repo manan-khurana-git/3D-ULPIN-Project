@@ -1682,9 +1682,15 @@ router.post(
 
 /*
 |--------------------------------------------------------------------------
-| GET OWNERSHIP HISTORY
+| GET PROPERTY OWNERSHIP + AUDIT HISTORY
 | GET /api/property-units/:verticalPropertyId/history
 |--------------------------------------------------------------------------
+|
+| Returns:
+| - Property information
+| - Current owner
+| - Complete ownership history
+| - Complete audit trail
 |
 | IMPORTANT:
 | This route must appear BEFORE the generic
@@ -1790,7 +1796,7 @@ router.get(
           [property.id]
         );
 
-      const history =
+      const ownershipHistory =
         historyResult.rows.map(
           (record) => ({
             id:
@@ -1821,11 +1827,118 @@ router.get(
           })
         );
 
+      /*
+       * ---------------------------------------------------------------
+       * CURRENT OWNER
+       * ---------------------------------------------------------------
+       */
+
       const currentOwner =
-        history.find(
+        ownershipHistory.find(
           (record) =>
             record.is_current
         ) ?? null;
+
+      /*
+       * ---------------------------------------------------------------
+       * GET AUDIT TRAIL
+       * ---------------------------------------------------------------
+       */
+
+      const auditResult =
+        await pool.query(
+          `
+          SELECT
+            al.id,
+            al.action,
+            al.entity_type,
+            al.entity_id,
+            al.property_unit_id,
+
+            al.previous_status,
+            al.new_status,
+
+            al.remarks,
+            al.metadata,
+            al.created_at,
+
+            u.id AS actor_id,
+            u.name AS actor_name,
+            u.email AS actor_email,
+            u.role AS actor_role
+
+          FROM audit_logs al
+
+          LEFT JOIN users u
+            ON u.id = al.actor_id
+
+          WHERE
+            al.property_unit_id =
+              $1::uuid
+
+          ORDER BY
+            al.created_at ASC
+          `,
+          [property.id]
+        );
+
+      const auditTrail =
+        auditResult.rows.map(
+          (record) => ({
+            id:
+              record.id,
+
+            action:
+              record.action,
+
+            entity_type:
+              record.entity_type,
+
+            entity_id:
+              record.entity_id,
+
+            property_unit_id:
+              record.property_unit_id,
+
+            previous_status:
+              record.previous_status,
+
+            new_status:
+              record.new_status,
+
+            remarks:
+              record.remarks,
+
+            metadata:
+              record.metadata ?? {},
+
+            created_at:
+              record.created_at,
+
+            actor:
+              record.actor_id
+                ? {
+                    id:
+                      record.actor_id,
+
+                    name:
+                      record.actor_name,
+
+                    email:
+                      record.actor_email,
+
+                    role:
+                      record.actor_role,
+                  }
+                : null,
+          })
+        );
+
+      /*
+       * ---------------------------------------------------------------
+       * RESPONSE
+       * ---------------------------------------------------------------
+       */
 
       return res.json({
         status: "ok",
@@ -1864,11 +1977,14 @@ router.get(
           currentOwner,
 
         ownership_history:
-          history,
+          ownershipHistory,
+
+        audit_trail:
+          auditTrail,
       });
     } catch (error) {
       console.error(
-        "Ownership history error:",
+        "Property history error:",
         error
       );
 
@@ -1881,7 +1997,7 @@ router.get(
         status: "error",
 
         message:
-          "Failed to fetch ownership history",
+          "Failed to fetch property history",
 
         details,
       });

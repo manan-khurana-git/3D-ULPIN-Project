@@ -256,3 +256,74 @@ CREATE TABLE IF NOT EXISTS utilities (
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ============================================
+-- PROPERTY TRANSFER REQUESTS
+-- Citizen-initiated ownership transfer workflow
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS property_transfer_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    property_unit_id UUID NOT NULL
+        REFERENCES property_units(id)
+        ON DELETE CASCADE,
+
+    current_owner_id UUID NOT NULL
+        REFERENCES owners(id)
+        ON DELETE RESTRICT,
+
+    new_owner_name VARCHAR(200) NOT NULL,
+
+    new_owner_contact VARCHAR(100),
+
+    ownership_percentage NUMERIC(5, 2) NOT NULL DEFAULT 100.00
+        CHECK (
+            ownership_percentage > 0
+            AND ownership_percentage <= 100
+        ),
+
+    transfer_date DATE NOT NULL DEFAULT CURRENT_DATE,
+
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING'
+        CHECK (
+            status IN (
+                'PENDING',
+                'APPROVED',
+                'REJECTED'
+            )
+        ),
+
+    submitted_by UUID NOT NULL
+        REFERENCES users(id)
+        ON DELETE RESTRICT,
+
+    reviewed_by UUID
+        REFERENCES users(id)
+        ON DELETE SET NULL,
+
+    submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    reviewed_at TIMESTAMPTZ,
+
+    remarks TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS property_transfer_requests_property_idx
+ON property_transfer_requests(property_unit_id);
+
+CREATE INDEX IF NOT EXISTS property_transfer_requests_status_idx
+ON property_transfer_requests(status);
+
+CREATE INDEX IF NOT EXISTS property_transfer_requests_submitted_by_idx
+ON property_transfer_requests(submitted_by);
+
+CREATE INDEX IF NOT EXISTS property_transfer_requests_reviewed_by_idx
+ON property_transfer_requests(reviewed_by);
+
+CREATE INDEX IF NOT EXISTS property_transfer_requests_created_at_idx
+ON property_transfer_requests(created_at);

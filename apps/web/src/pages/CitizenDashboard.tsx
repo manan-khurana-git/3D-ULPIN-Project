@@ -105,6 +105,61 @@ type AvailablePropertyResponse = {
     property_units: AvailablePropertyUnit[];
 };
 
+type OwnershipHistoryRecord = {
+    id: string;
+    owner_id: string;
+    name: string;
+    contact: string | null;
+    ownership_percentage: number;
+    valid_from: string;
+    valid_to: string | null;
+    is_current: boolean;
+};
+
+type AuditTrailRecord = {
+    id: string;
+    action: string;
+    entity_type: string;
+    entity_id: string | null;
+    property_unit_id: string;
+    previous_status: string | null;
+    new_status: string | null;
+    remarks: string | null;
+    metadata: Record<string, unknown>;
+    created_at: string;
+
+    actor: {
+        id: string;
+        name: string;
+        email: string;
+        role: string;
+    } | null;
+};
+
+type PropertyHistoryResponse = {
+    status: string;
+
+    property: {
+        id: string;
+        vertical_property_id: string;
+        parent_ulpin: string;
+        unit_number: string;
+        floor_number: number;
+        floor_label: string;
+
+        building: {
+            id: string;
+            name: string;
+        };
+    };
+
+    current_owner: OwnershipHistoryRecord | null;
+
+    ownership_history: OwnershipHistoryRecord[];
+
+    audit_trail: AuditTrailRecord[];
+};
+
 const API_BASE_URL = "http://localhost:5000/api";
 
 function formatDate(value: string | null) {
@@ -313,6 +368,41 @@ function CitizenDashboard() {
     const [selectedRegistration, setSelectedRegistration] =
         useState<CitizenRegistration | null>(null);
 
+    const [propertyHistory, setPropertyHistory] =
+        useState<PropertyHistoryResponse | null>(null);
+
+    const [isLoadingHistory, setIsLoadingHistory] =
+        useState(false);
+
+    const [historyError, setHistoryError] =
+        useState("");
+
+    const [historyRegistration, setHistoryRegistration] =
+        useState<CitizenRegistration | null>(null);
+
+    const [transferRegistration, setTransferRegistration] =
+        useState<CitizenRegistration | null>(null);
+
+    const [transferOwnerName, setTransferOwnerName] =
+        useState("");
+
+    const [transferOwnerContact, setTransferOwnerContact] =
+        useState("");
+
+    const [transferOwnershipPercentage, setTransferOwnershipPercentage] =
+        useState("100");
+
+    const [transferDate, setTransferDate] =
+        useState(
+            new Date().toISOString().slice(0, 10)
+        );
+
+    const [transferError, setTransferError] =
+        useState("");
+
+    const [isSubmittingTransfer, setIsSubmittingTransfer] =
+        useState(false);
+
     const [filter, setFilter] = useState<
         "ALL" | "PENDING" | "APPROVED" | "REJECTED"
     >("ALL");
@@ -375,10 +465,10 @@ function CitizenDashboard() {
 
                 const data =
                     (await response.json()) as
-                        | CitizenRegistrationResponse
-                        | {
-                              message?: string;
-                          };
+                    | CitizenRegistrationResponse
+                    | {
+                        message?: string;
+                    };
 
                 if (!response.ok) {
                     if (response.status === 401) {
@@ -455,10 +545,10 @@ function CitizenDashboard() {
 
             const data =
                 (await response.json()) as
-                    | AvailablePropertyResponse
-                    | {
-                          message?: string;
-                      };
+                | AvailablePropertyResponse
+                | {
+                    message?: string;
+                };
 
             if (!response.ok) {
                 if (response.status === 401) {
@@ -607,7 +697,7 @@ function CitizenDashboard() {
 
                 throw new Error(
                     data.message ??
-                        "Failed to submit property registration"
+                    "Failed to submit property registration"
                 );
             }
 
@@ -677,6 +767,217 @@ function CitizenDashboard() {
         availableProperties,
         showAllAvailableProperties,
     ]);
+
+    const openPropertyHistory = async (
+        registration: CitizenRegistration
+    ) => {
+        const token = getAuthToken();
+
+        if (!token) {
+            clearAuthData();
+            navigate("/login", { replace: true });
+            return;
+        }
+
+        setHistoryRegistration(registration);
+        setHistoryError("");
+        setPropertyHistory(null);
+        setIsLoadingHistory(true);
+
+        try {
+            const response = await fetch(
+                `${API_BASE_URL}/property-units/${encodeURIComponent(
+                    registration.property.vertical_property_id
+                )}/history`,
+                {
+                    method: "GET",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                }
+            );
+
+            const data =
+                (await response.json()) as
+                | PropertyHistoryResponse
+                | { message?: string };
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    clearAuthData();
+                    navigate("/login", {
+                        replace: true,
+                    });
+                    return;
+                }
+
+                throw new Error(
+                    "message" in data && data.message
+                        ? data.message
+                        : "Failed to load property history"
+                );
+            }
+
+            setPropertyHistory(
+                data as PropertyHistoryResponse
+            );
+        } catch (requestError) {
+            console.error(
+                "Property history loading error:",
+                requestError
+            );
+
+            setHistoryError(
+                requestError instanceof Error
+                    ? requestError.message
+                    : "Failed to load property history"
+            );
+        } finally {
+            setIsLoadingHistory(false);
+        }
+    };
+
+    const closePropertyHistory = () => {
+        if (isLoadingHistory) {
+            return;
+        }
+
+        setPropertyHistory(null);
+        setHistoryError("");
+        setHistoryRegistration(null);
+    };
+
+    const openTransferForm = (
+        registration: CitizenRegistration
+    ) => {
+        setTransferRegistration(registration);
+        setTransferOwnerName("");
+        setTransferOwnerContact("");
+        setTransferOwnershipPercentage("100");
+        setTransferDate(
+            new Date().toISOString().slice(0, 10)
+        );
+        setTransferError("");
+    };
+
+    const closeTransferForm = () => {
+        if (isSubmittingTransfer) {
+            return;
+        }
+
+        setTransferRegistration(null);
+        setTransferOwnerName("");
+        setTransferOwnerContact("");
+        setTransferOwnershipPercentage("100");
+        setTransferDate(
+            new Date().toISOString().slice(0, 10)
+        );
+        setTransferError("");
+    };
+
+    const handleTransferSubmit = async () => {
+        if (!transferRegistration) {
+            return;
+        }
+
+        const ownerName = transferOwnerName.trim();
+        const ownerContact = transferOwnerContact.trim();
+        const ownershipPercentage = Number(
+            transferOwnershipPercentage
+        );
+
+        if (!ownerName) {
+            setTransferError("Please enter the new owner's name.");
+            return;
+        }
+
+        if (
+            ownerContact &&
+            !/^\d{10}$/.test(ownerContact)
+        ) {
+            setTransferError(
+                "Please enter a valid 10-digit contact number."
+            );
+            return;
+        }
+
+        if (
+            !Number.isFinite(ownershipPercentage) ||
+            ownershipPercentage <= 0 ||
+            ownershipPercentage > 100
+        ) {
+            setTransferError(
+                "Ownership percentage must be between 0.01 and 100."
+            );
+            return;
+        }
+
+        if (!transferDate) {
+            setTransferError("Please select a transfer date.");
+            return;
+        }
+
+        setTransferError("");
+        setIsSubmittingTransfer(true);
+
+        try {
+            const token = getAuthToken();
+
+            if (!token) {
+    clearAuthData();
+    navigate("/login", { replace: true });
+    return;
+}
+
+const response = await fetch(
+    `${API_BASE_URL}/property-transfer-requests`,
+    {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+            property_unit_id:
+                transferRegistration.property_unit_id,
+            new_owner_name: ownerName,
+            new_owner_contact:
+                ownerContact || null,
+            ownership_percentage:
+                ownershipPercentage,
+            transfer_date: transferDate,
+        }),
+    }
+);
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    clearAuthData();
+                    navigate("/login", { replace: true });
+                    return;
+                }
+
+                throw new Error(
+                    data?.message ||
+                    "Failed to submit transfer request."
+                );
+            }
+
+            closeTransferForm();
+
+            await loadRegistrations();
+        } catch (err) {
+            setTransferError(
+                err instanceof Error
+                    ? err.message
+                    : "Failed to submit transfer request."
+            );
+        } finally {
+            setIsSubmittingTransfer(false);
+        }
+    };
 
     const handleLogout = () => {
         clearAuthData();
@@ -1228,12 +1529,12 @@ function CitizenDashboard() {
                                         {value === "ALL"
                                             ? stats.total
                                             : value ===
-                                              "PENDING"
-                                            ? stats.pending
-                                            : value ===
-                                              "APPROVED"
-                                            ? stats.approved
-                                            : stats.rejected}
+                                                "PENDING"
+                                                ? stats.pending
+                                                : value ===
+                                                    "APPROVED"
+                                                    ? stats.approved
+                                                    : stats.rejected}
                                     </span>
                                 </button>
                             )
@@ -1269,7 +1570,7 @@ function CitizenDashboard() {
                             </span>
                         </div>
                     ) : filteredRegistrations.length ===
-                      0 ? (
+                        0 ? (
                         <div className="empty-properties">
                             <div className="empty-icon">
                                 <svg
@@ -1437,7 +1738,7 @@ function CitizenDashboard() {
                                                         registration
                                                             .ownership
                                                             ?.percentage ??
-                                                            0
+                                                        0
                                                     )}
                                                 </strong>
                                             </div>
@@ -1513,7 +1814,7 @@ function CitizenDashboard() {
                                                     registration
                                                         .ownership
                                                         ?.percentage ??
-                                                        0
+                                                    0
                                                 )}
                                             </div>
                                         </div>
@@ -1543,6 +1844,32 @@ function CitizenDashboard() {
                                                 >
                                                     View Details
                                                 </button>
+
+                                                <button
+                                                    type="button"
+                                                    className="secondary-action"
+                                                    onClick={() =>
+                                                        void openPropertyHistory(
+                                                            registration
+                                                        )
+                                                    }
+                                                >
+                                                    History
+                                                </button>
+
+                                                {registration.status === "APPROVED" && (
+                                                    <button
+                                                        type="button"
+                                                        className="secondary-action"
+                                                        onClick={() =>
+                                                            openTransferForm(
+                                                                registration
+                                                            )
+                                                        }
+                                                    >
+                                                        Transfer Property
+                                                    </button>
+                                                )}
 
                                                 <button
                                                     type="button"
@@ -2107,7 +2434,7 @@ function CitizenDashboard() {
                                             selectedRegistration
                                                 .ownership
                                                 ?.percentage ??
-                                                0
+                                            0
                                         )}
                                     </strong>
                                 </div>
@@ -2155,8 +2482,8 @@ function CitizenDashboard() {
                                         <span>
                                             {selectedRegistration.reviewed_at
                                                 ? formatDateTime(
-                                                      selectedRegistration.reviewed_at
-                                                  )
+                                                    selectedRegistration.reviewed_at
+                                                )
                                                 : "Awaiting review"}
                                         </span>
                                     </div>
@@ -2165,12 +2492,12 @@ function CitizenDashboard() {
                                 <div
                                     className={
                                         selectedRegistration.status ===
-                                        "APPROVED"
+                                            "APPROVED"
                                             ? "timeline-item complete"
                                             : selectedRegistration.status ===
-                                              "REJECTED"
-                                            ? "timeline-item rejected"
-                                            : "timeline-item"
+                                                "REJECTED"
+                                                ? "timeline-item rejected"
+                                                : "timeline-item"
                                     }
                                 >
                                     <span className="timeline-dot" />
@@ -2178,18 +2505,18 @@ function CitizenDashboard() {
                                     <div>
                                         <strong>
                                             {selectedRegistration.status ===
-                                            "APPROVED"
+                                                "APPROVED"
                                                 ? "Property Registered"
                                                 : selectedRegistration.status ===
-                                                  "REJECTED"
-                                                ? "Registration Rejected"
-                                                : "Registration Decision"}
+                                                    "REJECTED"
+                                                    ? "Registration Rejected"
+                                                    : "Registration Decision"}
                                         </strong>
 
                                         <span>
                                             {selectedRegistration.registration_number ??
                                                 (selectedRegistration.status ===
-                                                "PENDING"
+                                                    "PENDING"
                                                     ? "Decision pending"
                                                     : "—")}
                                         </span>
@@ -2284,6 +2611,730 @@ function CitizenDashboard() {
                     </div>
                 </div>
             )}
+
+            {transferRegistration && (
+                <div
+                    className="citizen-modal-backdrop"
+                    onMouseDown={(event) => {
+                        if (
+                            event.target ===
+                            event.currentTarget
+                        ) {
+                            closeTransferForm();
+                        }
+                    }}
+                >
+                    <div className="citizen-modal">
+                        <div className="citizen-modal-header">
+                            <div>
+                                <div className="section-kicker">
+                                    OWNERSHIP TRANSFER
+                                </div>
+
+                                <h2>
+                                    Transfer Property
+                                </h2>
+
+                                <p>
+                                    {
+                                        transferRegistration
+                                            .property
+                                            .building_name
+                                    }{" "}
+                                    ·{" "}
+                                    {
+                                        transferRegistration
+                                            .property
+                                            .floor_label
+                                    }{" "}
+                                    · Unit{" "}
+                                    {
+                                        transferRegistration
+                                            .property
+                                            .unit_number
+                                    }
+                                </p>
+                            </div>
+
+                            <button
+                                type="button"
+                                className="modal-close"
+                                onClick={closeTransferForm}
+                                disabled={
+                                    isSubmittingTransfer
+                                }
+                                aria-label="Close"
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div className="modal-status-row">
+                            <div className="property-status status-approved">
+                                <span className="status-dot" />
+                                Registered Property
+                            </div>
+                        </div>
+
+                        <div className="modal-vpid">
+                            <span>
+                                Vertical Property ID
+                            </span>
+
+                            <strong>
+                                {
+                                    transferRegistration
+                                        .property
+                                        .vertical_property_id
+                                }
+                            </strong>
+                        </div>
+
+                        <div className="modal-grid">
+                            <div className="modal-field">
+                                <span>
+                                    Parent ULPIN
+                                </span>
+
+                                <strong>
+                                    {
+                                        transferRegistration
+                                            .property
+                                            .parent_ulpin
+                                    }
+                                </strong>
+                            </div>
+
+                            <div className="modal-field">
+                                <span>
+                                    Unit
+                                </span>
+
+                                <strong>
+                                    {
+                                        transferRegistration
+                                            .property
+                                            .unit_number
+                                    }
+                                </strong>
+                            </div>
+
+                            <div className="modal-field">
+                                <span>
+                                    Floor
+                                </span>
+
+                                <strong>
+                                    {
+                                        transferRegistration
+                                            .property
+                                            .floor_label
+                                    }
+                                </strong>
+                            </div>
+
+                            <div className="modal-field">
+                                <span>
+                                    Current Owner
+                                </span>
+
+                                <strong>
+                                    {
+                                        transferRegistration
+                                            .owner
+                                            ?.name ??
+                                        "Not available"
+                                    }
+                                </strong>
+                            </div>
+                        </div>
+
+                        <div className="modal-section">
+                            <h3>
+                                New Owner Details
+                            </h3>
+
+                            <div className="modal-grid">
+                                <div className="modal-field">
+                                    <label htmlFor="transfer-owner-name">
+                                        New Owner Name
+                                    </label>
+
+                                    <input
+                                        id="transfer-owner-name"
+                                        type="text"
+                                        value={
+                                            transferOwnerName
+                                        }
+                                        onChange={(event) =>
+                                            setTransferOwnerName(
+                                                event.target.value
+                                            )
+                                        }
+                                        placeholder="Enter new owner name"
+                                        disabled={
+                                            isSubmittingTransfer
+                                        }
+                                    />
+                                </div>
+
+                                <div className="modal-field">
+                                    <label htmlFor="transfer-owner-contact">
+                                        New Owner Contact
+                                    </label>
+
+                                    <input
+                                        id="transfer-owner-contact"
+                                        type="tel"
+                                        inputMode="numeric"
+                                        maxLength={10}
+                                        value={
+                                            transferOwnerContact
+                                        }
+                                        onChange={(event) =>
+                                            setTransferOwnerContact(
+                                                event.target.value.replace(
+                                                    /\D/g,
+                                                    ""
+                                                )
+                                            )
+                                        }
+                                        placeholder="10-digit mobile number"
+                                        disabled={
+                                            isSubmittingTransfer
+                                        }
+                                    />
+                                </div>
+
+                                <div className="modal-field">
+                                    <label htmlFor="transfer-ownership-percentage">
+                                        Ownership Percentage
+                                    </label>
+
+                                    <input
+                                        id="transfer-ownership-percentage"
+                                        type="number"
+                                        min="0.01"
+                                        max="100"
+                                        step="0.01"
+                                        value={
+                                            transferOwnershipPercentage
+                                        }
+                                        onChange={(event) =>
+                                            setTransferOwnershipPercentage(
+                                                event.target.value
+                                            )
+                                        }
+                                        disabled={
+                                            isSubmittingTransfer
+                                        }
+                                    />
+                                </div>
+
+                                <div className="modal-field">
+                                    <label htmlFor="transfer-date">
+                                        Transfer Date
+                                    </label>
+
+                                    <input
+                                        id="transfer-date"
+                                        type="date"
+                                        value={
+                                            transferDate
+                                        }
+                                        onChange={(event) =>
+                                            setTransferDate(
+                                                event.target.value
+                                            )
+                                        }
+                                        disabled={
+                                            isSubmittingTransfer
+                                        }
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="remarks-box">
+                            <span>
+                                Government Verification
+                            </span>
+
+                            <p>
+                                This transfer will first be submitted
+                                as a pending request. A government
+                                officer must verify and approve the
+                                request before ownership is changed.
+                            </p>
+                        </div>
+
+                        {transferError && (
+                            <div className="citizen-error">
+                                <strong>
+                                    Transfer request failed
+                                </strong>
+
+                                <span>
+                                    {transferError}
+                                </span>
+                            </div>
+                        )}
+
+                        <div className="citizen-modal-footer">
+                            <button
+                                type="button"
+                                className="secondary-action"
+                                onClick={closeTransferForm}
+                                disabled={
+                                    isSubmittingTransfer
+                                }
+                            >
+                                Cancel
+                            </button>
+
+                            <button
+                                type="button"
+                                className="primary-action"
+                                onClick={() => void handleTransferSubmit()}
+                                disabled={isSubmittingTransfer}
+                            >
+                                {isSubmittingTransfer
+                                    ? "Submitting..."
+                                    : "Submit Transfer Request"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {(isLoadingHistory || historyError || propertyHistory) && (
+                <div
+                    className="citizen-modal-backdrop"
+                    onMouseDown={(event) => {
+                        if (
+                            event.target === event.currentTarget &&
+                            !isLoadingHistory
+                        ) {
+                            closePropertyHistory();
+                        }
+                    }}
+                >
+                    <div className="citizen-modal history-modal">
+                        <div className="citizen-modal-header">
+                            <div>
+                                <div className="section-kicker">
+                                    PROPERTY HISTORY
+                                </div>
+
+                                <h2>
+                                    {propertyHistory
+                                        ? propertyHistory.property.building.name
+                                        : "Property History"}
+                                </h2>
+
+                                {propertyHistory && (
+                                    <p>
+                                        {propertyHistory.property.floor_label} · Unit{" "}
+                                        {propertyHistory.property.unit_number}
+                                    </p>
+                                )}
+                            </div>
+
+                            {!isLoadingHistory && (
+                                <button
+                                    type="button"
+                                    className="modal-close"
+                                    onClick={closePropertyHistory}
+                                    aria-label="Close"
+                                >
+                                    ×
+                                </button>
+                            )}
+                        </div>
+
+                        {isLoadingHistory ? (
+                            <div className="property-loading">
+                                <div className="loading-spinner" />
+                                <span>
+                                    Loading ownership history...
+                                </span>
+                            </div>
+                        ) : historyError ? (
+                            <div className="citizen-error">
+                                <strong>
+                                    Unable to load history
+                                </strong>
+
+                                <span>
+                                    {historyError}
+                                </span>
+
+                                {historyRegistration && (
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            void openPropertyHistory(
+                                                historyRegistration
+                                            )
+                                        }
+                                    >
+                                        Try Again
+                                    </button>
+                                )}
+                            </div>
+                        ) : propertyHistory ? (
+                            <>
+                                <div className="modal-vpid">
+                                    <span>
+                                        Vertical Property ID
+                                    </span>
+
+                                    <strong>
+                                        {
+                                            propertyHistory.property
+                                                .vertical_property_id
+                                        }
+                                    </strong>
+                                </div>
+
+                                <div className="modal-grid">
+                                    <div className="modal-field">
+                                        <span>
+                                            Parent ULPIN
+                                        </span>
+
+                                        <strong>
+                                            {
+                                                propertyHistory.property
+                                                    .parent_ulpin
+                                            }
+                                        </strong>
+                                    </div>
+
+                                    <div className="modal-field">
+                                        <span>
+                                            Building
+                                        </span>
+
+                                        <strong>
+                                            {
+                                                propertyHistory.property
+                                                    .building.name
+                                            }
+                                        </strong>
+                                    </div>
+
+                                    <div className="modal-field">
+                                        <span>
+                                            Floor
+                                        </span>
+
+                                        <strong>
+                                            {
+                                                propertyHistory.property
+                                                    .floor_label
+                                            }
+                                        </strong>
+                                    </div>
+
+                                    <div className="modal-field">
+                                        <span>
+                                            Unit
+                                        </span>
+
+                                        <strong>
+                                            {
+                                                propertyHistory.property
+                                                    .unit_number
+                                            }
+                                        </strong>
+                                    </div>
+                                </div>
+
+                                {/* Current Owner */}
+                                <div className="modal-section">
+                                    <h3>
+                                        Current Owner
+                                    </h3>
+
+                                    {propertyHistory.current_owner ? (
+                                        <div className="ownership-panel">
+                                            <div className="owner-avatar large">
+                                                {propertyHistory.current_owner.name
+                                                    .charAt(0)
+                                                    .toUpperCase()}
+                                            </div>
+
+                                            <div className="ownership-person">
+                                                <span>
+                                                    Owner
+                                                </span>
+
+                                                <strong>
+                                                    {
+                                                        propertyHistory
+                                                            .current_owner
+                                                            .name
+                                                    }
+                                                </strong>
+
+                                                <small>
+                                                    {
+                                                        propertyHistory
+                                                            .current_owner
+                                                            .contact
+                                                    }
+                                                </small>
+                                            </div>
+
+                                            <div className="ownership-value">
+                                                <span>
+                                                    Ownership
+                                                </span>
+
+                                                <strong>
+                                                    {formatPercentage(
+                                                        propertyHistory
+                                                            .current_owner
+                                                            .ownership_percentage
+                                                    )}
+                                                </strong>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="remarks-box">
+                                            <span>
+                                                No Active Owner
+                                            </span>
+
+                                            <p>
+                                                This property currently has no active
+                                                ownership record.
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Ownership History */}
+                                <div className="modal-section">
+                                    <h3>
+                                        Ownership History
+                                    </h3>
+
+                                    {propertyHistory.ownership_history
+                                        .length === 0 ? (
+                                        <div className="remarks-box">
+                                            <p>
+                                                No ownership history available.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="history-list">
+                                            {propertyHistory.ownership_history.map(
+                                                (ownership) => (
+                                                    <div
+                                                        key={ownership.id}
+                                                        className={
+                                                            ownership.is_current
+                                                                ? "history-card current"
+                                                                : "history-card"
+                                                        }
+                                                    >
+                                                        <div className="history-card-header">
+                                                            <div>
+                                                                <strong>
+                                                                    {
+                                                                        ownership.name
+                                                                    }
+                                                                </strong>
+
+                                                                <span>
+                                                                    {ownership.is_current
+                                                                        ? "Current Owner"
+                                                                        : "Previous Owner"}
+                                                                </span>
+                                                            </div>
+
+                                                            <strong>
+                                                                {formatPercentage(
+                                                                    ownership.ownership_percentage
+                                                                )}
+                                                            </strong>
+                                                        </div>
+
+                                                        <div className="history-card-details">
+                                                            <span>
+                                                                Valid From
+                                                            </span>
+
+                                                            <strong>
+                                                                {formatDate(
+                                                                    ownership.valid_from
+                                                                )}
+                                                            </strong>
+
+                                                            <span>
+                                                                Valid To
+                                                            </span>
+
+                                                            <strong>
+                                                                {ownership.valid_to
+                                                                    ? formatDate(
+                                                                        ownership.valid_to
+                                                                    )
+                                                                    : "Present"}
+                                                            </strong>
+                                                        </div>
+                                                    </div>
+                                                )
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Audit Trail */}
+                                <div className="modal-section">
+                                    <h3>
+                                        Audit Trail
+                                    </h3>
+
+                                    {propertyHistory.audit_trail
+                                        .length === 0 ? (
+                                        <div className="remarks-box">
+                                            <p>
+                                                No audit events available for this
+                                                property.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="audit-timeline">
+                                            {propertyHistory.audit_trail.map(
+                                                (audit) => (
+                                                    <div
+                                                        key={audit.id}
+                                                        className="audit-item"
+                                                    >
+                                                        <div className="audit-marker">
+                                                            <span />
+                                                        </div>
+
+                                                        <div className="audit-content">
+                                                            <div className="audit-header">
+                                                                <strong>
+                                                                    {audit.action ===
+                                                                        "CITIZEN_REGISTRATION_SUBMITTED"
+                                                                        ? "Registration Submitted"
+                                                                        : audit.action ===
+                                                                            "REGISTRATION_APPROVED"
+                                                                            ? "Registration Approved"
+                                                                            : audit.action ===
+                                                                                "REGISTRATION_REJECTED"
+                                                                                ? "Registration Rejected"
+                                                                                : audit.action.replace(
+                                                                                    /_/g,
+                                                                                    " "
+                                                                                )}
+                                                                </strong>
+
+                                                                <span>
+                                                                    {formatDateTime(
+                                                                        audit.created_at
+                                                                    )}
+                                                                </span>
+                                                            </div>
+
+                                                            <div className="audit-status-row">
+                                                                {audit.previous_status && (
+                                                                    <span>
+                                                                        {
+                                                                            audit.previous_status
+                                                                        }
+                                                                    </span>
+                                                                )}
+
+                                                                {audit.previous_status &&
+                                                                    audit.new_status && (
+                                                                        <span>
+                                                                            →
+                                                                        </span>
+                                                                    )}
+
+                                                                {audit.new_status && (
+                                                                    <span>
+                                                                        {
+                                                                            audit.new_status
+                                                                        }
+                                                                    </span>
+                                                                )}
+                                                            </div>
+
+                                                            {audit.actor && (
+                                                                <div className="audit-actor">
+                                                                    <span>
+                                                                        Performed by
+                                                                    </span>
+
+                                                                    <strong>
+                                                                        {
+                                                                            audit.actor
+                                                                                .name
+                                                                        }
+                                                                    </strong>
+
+                                                                    <small>
+                                                                        {
+                                                                            audit.actor
+                                                                                .role
+                                                                        }
+                                                                    </small>
+                                                                </div>
+                                                            )}
+
+                                                            {audit.remarks && (
+                                                                <p className="audit-remarks">
+                                                                    {
+                                                                        audit.remarks
+                                                                    }
+                                                                </p>
+                                                            )}
+
+                                                            {typeof audit.metadata
+                                                                .registration_number ===
+                                                                "string" && (
+                                                                    <div className="audit-registration">
+                                                                        Registration:
+                                                                        <strong>
+                                                                            {
+                                                                                audit
+                                                                                    .metadata
+                                                                                    .registration_number
+                                                                            }
+                                                                        </strong>
+                                                                    </div>
+                                                                )}
+                                                        </div>
+                                                    </div>
+                                                )
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="citizen-modal-footer">
+                                    <button
+                                        type="button"
+                                        className="secondary-action"
+                                        onClick={closePropertyHistory}
+                                    >
+                                        Close
+                                    </button>
+                                </div>
+                            </>
+                        ) : null}
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 }
