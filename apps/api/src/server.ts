@@ -8,6 +8,7 @@ import propertyUnitRoutes from "./routes/propertyUnitRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import propertyRegistrationRoutes from "./routes/propertyRegistrationRoutes.js";
 import propertyTransferRequestRoutes from "./routes/propertyTransferRequestRoutes.js";
+import buildingStructureRoutes from "./routes/buildingStructureRoutes.js";
 
 dotenv.config();
 
@@ -24,6 +25,7 @@ app.use("/api/buildings", buildingRoutes);
 app.use("/api/property-units", propertyUnitRoutes);
 app.use("/api/property-registrations",propertyRegistrationRoutes);
 app.use("/api/property-transfer-requests",propertyTransferRequestRoutes);
+app.use("/api/building-structure", buildingStructureRoutes);
 
 /*
  * OpenStreetMap tile proxy

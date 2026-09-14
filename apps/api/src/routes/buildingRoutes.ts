@@ -28,6 +28,8 @@ router.get(
           b.floor_height_m,
           b.base_elevation_m,
 
+          b.state,
+
           COUNT(f.id)::int AS floors,
 
           p.ulpin,
@@ -50,6 +52,7 @@ router.get(
           b.number_of_floors,
           b.floor_height_m,
           b.base_elevation_m,
+          b.state,
           p.ulpin,
           p.parcel_number
 
@@ -99,6 +102,8 @@ router.get(
             b.floor_height_m,
             b.base_elevation_m,
 
+            b.state,
+
             COUNT(f.id)::int AS floors,
 
             p.ulpin,
@@ -124,6 +129,7 @@ router.get(
             b.number_of_floors,
             b.floor_height_m,
             b.base_elevation_m,
+            b.state,
             p.ulpin,
             p.parcel_number,
             p.area_sq_m
@@ -213,6 +219,8 @@ router.get(
             b.floor_height_m,
             b.base_elevation_m,
 
+            b.state,
+
             COUNT(f.id)::int AS floors,
 
             p.ulpin,
@@ -235,6 +243,7 @@ router.get(
             b.number_of_floors,
             b.floor_height_m,
             b.base_elevation_m,
+            b.state,
             p.ulpin,
             p.parcel_number
           `,
@@ -299,7 +308,8 @@ router.get(
             f.floor_number,
             f.floor_label,
 
-            b.id AS building_id
+            b.id AS building_id,
+            b.state
 
           FROM property_units pu
 
