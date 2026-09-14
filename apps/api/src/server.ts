@@ -218,8 +218,8 @@ app.get("/api/db-test", async (_req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(
+app.listen(Number(PORT), "0.0.0.0", () => {
+console.log(
     `🚀 3D ULPIN API running on http://localhost:${PORT}`
   );
 });
