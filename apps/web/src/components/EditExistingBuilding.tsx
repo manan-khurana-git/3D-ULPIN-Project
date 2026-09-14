@@ -6,7 +6,7 @@ import {
 import { getAuthToken } from "../services/authService";
 
 const API_BASE_URL =
-  "http://localhost:5000/api";
+  "https://threed-ulpin-api.onrender.com/api";
 
 type Building = {
   id: string;

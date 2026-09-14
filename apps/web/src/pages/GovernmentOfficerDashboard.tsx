@@ -130,7 +130,7 @@ type TransferFilterType =
     | TransferStatus;
 
 const API_BASE_URL =
-    "http://localhost:5000/api";
+    "https://threed-ulpin-api.onrender.com/api";
 
 function GovernmentOfficerDashboard() {
     const navigate = useNavigate();

@@ -182,7 +182,7 @@ type PropertyHistoryResponse = {
     audit_trail: AuditTrailRecord[];
 };
 
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = "https://threed-ulpin-api.onrender.com/api";
 
 function formatDate(value: string | null) {
     if (!value) {

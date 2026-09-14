@@ -27,7 +27,7 @@ import {
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import "./App.css";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = "https://threed-ulpin-api.onrender.com/api";
 
 async function apiFetch(
   url: string,
@@ -895,7 +895,7 @@ function App() {
       new OpenStreetMapImageryProvider(
         {
           url:
-            "http://localhost:5000/api/map/tiles/",
+            "https://threed-ulpin-api.onrender.com/api/map/tiles/",
             maximumLevel: 19,
         }
       );

@@ -16,7 +16,7 @@ import {
 
 import "./SurveyorDashboard.css";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = "https://threed-ulpin-api.onrender.com/api";
 
 const formatStructureType = (value: string) => {
     return value
