@@ -14,13 +14,58 @@ import ProtectedRoute from "./ProtectedRoute";
 import EditExistingBuilding from "./components/EditExistingBuilding";
 import GovernmentOfficerDashboard from "./pages/GovernmentOfficerDashboard";
 import CitizenDashboard from "./pages/CitizenDashboard";
+import SurveyorDashboard from "./pages/SurveyorDashboard";
+
 import { getAuthUser } from "./services/authService";
+
 import "./index.css";
+
+/* =========================================================
+   DASHBOARD ENTRY
+
+   Decides which dashboard should open at /dashboard
+   according to the logged-in user's role.
+========================================================= */
 
 function DashboardEntry() {
   const user = getAuthUser();
 
   /*
+   * =======================================================
+   * SURVEYOR
+   *
+   * Surveyors should land on the Surveyor Dashboard.
+   * =======================================================
+   */
+
+  if (
+    user?.role === "SURVEYOR"
+  ) {
+    return (
+      <SurveyorDashboard />
+    );
+  }
+
+  /*
+   * =======================================================
+   * GOVERNMENT OFFICER
+   * =======================================================
+   */
+
+  if (
+    user?.role ===
+    "GOVERNMENT_OFFICER"
+  ) {
+    return (
+      <GovernmentOfficerDashboard />
+    );
+  }
+
+  /*
+   * =======================================================
+   * CITIZEN
+   * =======================================================
+   *
    * Citizen normally lands on the Citizen Property Portal.
    *
    * When the Citizen Portal sends:
@@ -28,46 +73,89 @@ function DashboardEntry() {
    * /dashboard?vpid=12345678901236-B05-F01-U101
    *
    * open the existing Cesium 3D Explorer instead.
+   * =======================================================
    */
-  const hasVpidDeepLink =
-    new URLSearchParams(window.location.search).has("vpid");
 
-  if (user?.role === "GOVERNMENT_OFFICER") {
-    return <GovernmentOfficerDashboard />;
-  }
+  if (
+    user?.role === "CITIZEN"
+  ) {
+    const hasVpidDeepLink =
+      new URLSearchParams(
+        window.location.search
+      ).has("vpid");
 
-  if (user?.role === "CITIZEN") {
     if (hasVpidDeepLink) {
       return <App />;
     }
 
-    return <CitizenDashboard />;
+    return (
+      <CitizenDashboard />
+    );
   }
+
+  /*
+   * =======================================================
+   * DEFAULT
+   * =======================================================
+   */
 
   return <App />;
 }
+
+/* =========================================================
+   APPLICATION
+========================================================= */
 
 ReactDOM.createRoot(
   document.getElementById("root")!
 ).render(
   <React.StrictMode>
     <BrowserRouter>
+
       <Routes>
+
+        {/* =================================================
+            PUBLIC ROUTES
+        ================================================= */}
+
         <Route
           path="/login"
-          element={<Login />}
+          element={
+            <Login />
+          }
         />
 
         <Route
           path="/register"
-          element={<Register />}
+          element={
+            <Register />
+          }
         />
 
-        <Route element={<ProtectedRoute />}>
+        {/* =================================================
+            PROTECTED ROUTES
+        ================================================= */}
+
+        <Route
+          element={
+            <ProtectedRoute />
+          }
+        >
+
+          {/* =================================================
+              ROLE-BASED MAIN DASHBOARD
+          ================================================= */}
+
           <Route
             path="/dashboard"
-            element={<DashboardEntry />}
+            element={
+              <DashboardEntry />
+            }
           />
+
+          {/* =================================================
+              GOVERNMENT OFFICER DASHBOARD
+          ================================================= */}
 
           <Route
             path="/government-dashboard"
@@ -76,13 +164,33 @@ ReactDOM.createRoot(
             }
           />
 
+          {/* =================================================
+              SURVEYOR DASHBOARD
+          ================================================= */}
+
+          <Route
+            path="/surveyor"
+            element={
+              <SurveyorDashboard />
+            }
+          />
+
+          {/* =================================================
+              EDIT EXISTING BUILDING
+          ================================================= */}
+
           <Route
             path="/edit-building"
             element={
               <EditExistingBuilding />
             }
           />
+
         </Route>
+
+        {/* =================================================
+            ROOT
+        ================================================= */}
 
         <Route
           path="/"
@@ -94,6 +202,10 @@ ReactDOM.createRoot(
           }
         />
 
+        {/* =================================================
+            UNKNOWN ROUTES
+        ================================================= */}
+
         <Route
           path="*"
           element={
@@ -103,7 +215,9 @@ ReactDOM.createRoot(
             />
           }
         />
+
       </Routes>
+
     </BrowserRouter>
   </React.StrictMode>
 );

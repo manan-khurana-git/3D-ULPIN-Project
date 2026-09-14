@@ -69,9 +69,65 @@ type Registration = {
     building_name: string;
 };
 
+type TransferStatus =
+    | "PENDING"
+    | "APPROVED"
+    | "REJECTED";
+
+type TransferRequest = {
+    id: string;
+
+    property_unit_id: string;
+    current_owner_id: string;
+
+    new_owner_name: string;
+    new_owner_contact: string | null;
+
+    ownership_percentage:
+        | number
+        | string;
+
+    transfer_date: string;
+
+    status: TransferStatus;
+
+    submitted_by: string;
+    submitted_by_name: string | null;
+    submitted_by_email: string | null;
+
+    reviewed_by: string | null;
+    reviewed_by_name: string | null;
+    reviewed_by_email: string | null;
+
+    submitted_at: string;
+    reviewed_at: string | null;
+
+    remarks: string | null;
+
+    created_at: string;
+    updated_at: string;
+
+    unit_number: string;
+    vertical_property_id: string;
+    parent_ulpin: string;
+
+    floor_number: number;
+    floor_label: string;
+
+    building_id: string;
+    building_name: string;
+
+    current_owner_name: string;
+    current_owner_contact: string | null;
+};
+
 type FilterType =
     | "ALL"
     | RegistrationStatus;
+
+type TransferFilterType =
+    | "ALL"
+    | TransferStatus;
 
 const API_BASE_URL =
     "http://localhost:5000/api";
@@ -80,6 +136,12 @@ function GovernmentOfficerDashboard() {
     const navigate = useNavigate();
 
     const user = getAuthUser();
+
+    /*
+     * --------------------------------------------------------------------------
+     * REGISTRATION STATE
+     * --------------------------------------------------------------------------
+     */
 
     const [
         registrations,
@@ -100,6 +162,39 @@ function GovernmentOfficerDashboard() {
     ] =
         useState<FilterType>("ALL");
 
+    /*
+     * --------------------------------------------------------------------------
+     * TRANSFER STATE
+     * --------------------------------------------------------------------------
+     */
+
+    const [
+        transferRequests,
+        setTransferRequests,
+    ] = useState<TransferRequest[]>([]);
+
+    const [
+        selectedTransfer,
+        setSelectedTransfer,
+    ] =
+        useState<TransferRequest | null>(
+            null
+        );
+
+    const [
+        transferFilter,
+        setTransferFilter,
+    ] =
+        useState<TransferFilterType>(
+            "ALL"
+        );
+
+    /*
+     * --------------------------------------------------------------------------
+     * COMMON STATE
+     * --------------------------------------------------------------------------
+     */
+
     const [
         reviewRemarks,
         setReviewRemarks,
@@ -108,6 +203,11 @@ function GovernmentOfficerDashboard() {
     const [
         isLoading,
         setIsLoading,
+    ] = useState(true);
+
+    const [
+        isTransferLoading,
+        setIsTransferLoading,
     ] = useState(true);
 
     const [
@@ -204,6 +304,95 @@ function GovernmentOfficerDashboard() {
 
     /*
      * --------------------------------------------------------------------------
+     * LOAD TRANSFER REQUESTS
+     * --------------------------------------------------------------------------
+     */
+
+    async function loadTransferRequests() {
+        const token = getAuthToken();
+
+        if (!token) {
+            clearAuthData();
+
+            navigate("/login", {
+                replace: true,
+            });
+
+            return;
+        }
+
+        try {
+            setIsTransferLoading(true);
+
+            const response =
+                await fetch(
+                    `${API_BASE_URL}/property-transfer-requests`,
+                    {
+                        method: "GET",
+                        headers: {
+                            Authorization:
+                                `Bearer ${token}`,
+                        },
+                    }
+                );
+
+            const data =
+                await response.json();
+
+            if (!response.ok) {
+                if (
+                    response.status ===
+                    401
+                ) {
+                    clearAuthData();
+
+                    navigate("/login", {
+                        replace: true,
+                    });
+
+                    return;
+                }
+
+                throw new Error(
+                    data.message ||
+                    "Failed to load transfer requests"
+                );
+            }
+
+            setTransferRequests(
+                data.transfer_requests || []
+            );
+        } catch (err) {
+            console.error(
+                "Transfer request loading error:",
+                err
+            );
+
+            setError(
+                err instanceof Error
+                    ? err.message
+                    : "Failed to load transfer requests"
+            );
+        } finally {
+            setIsTransferLoading(false);
+        }
+    }
+
+    /*
+     * --------------------------------------------------------------------------
+     * REFRESH EVERYTHING
+     * --------------------------------------------------------------------------
+     */
+
+    async function refreshDashboard() {
+        await Promise.all([
+            loadRegistrations(),
+            loadTransferRequests(),
+        ]);
+    }
+
+    /*
+     * --------------------------------------------------------------------------
      * LOGOUT
      * --------------------------------------------------------------------------
      */
@@ -245,12 +434,12 @@ function GovernmentOfficerDashboard() {
             return;
         }
 
-        void loadRegistrations();
+        void refreshDashboard();
     }, [navigate]);
 
     /*
      * --------------------------------------------------------------------------
-     * STATISTICS
+     * REGISTRATION STATISTICS
      * --------------------------------------------------------------------------
      */
 
@@ -286,7 +475,45 @@ function GovernmentOfficerDashboard() {
 
     /*
      * --------------------------------------------------------------------------
-     * FILTERED REQUESTS
+     * TRANSFER STATISTICS
+     * --------------------------------------------------------------------------
+     */
+
+    const transferStatistics =
+        useMemo(() => {
+            const pending =
+                transferRequests.filter(
+                    (item) =>
+                        item.status ===
+                        "PENDING"
+                ).length;
+
+            const approved =
+                transferRequests.filter(
+                    (item) =>
+                        item.status ===
+                        "APPROVED"
+                ).length;
+
+            const rejected =
+                transferRequests.filter(
+                    (item) =>
+                        item.status ===
+                        "REJECTED"
+                ).length;
+
+            return {
+                total:
+                    transferRequests.length,
+                pending,
+                approved,
+                rejected,
+            };
+        }, [transferRequests]);
+
+    /*
+     * --------------------------------------------------------------------------
+     * FILTER REGISTRATIONS
      * --------------------------------------------------------------------------
      */
 
@@ -311,7 +538,32 @@ function GovernmentOfficerDashboard() {
 
     /*
      * --------------------------------------------------------------------------
-     * SELECT REQUEST
+     * FILTER TRANSFERS
+     * --------------------------------------------------------------------------
+     */
+
+    const filteredTransfers =
+        useMemo(() => {
+            if (
+                transferFilter ===
+                "ALL"
+            ) {
+                return transferRequests;
+            }
+
+            return transferRequests.filter(
+                (item) =>
+                    item.status ===
+                    transferFilter
+            );
+        }, [
+            transferRequests,
+            transferFilter,
+        ]);
+
+    /*
+     * --------------------------------------------------------------------------
+     * OPEN REGISTRATION REVIEW
      * --------------------------------------------------------------------------
      */
 
@@ -321,6 +573,8 @@ function GovernmentOfficerDashboard() {
         setSelectedRegistration(
             registration
         );
+
+        setSelectedTransfer(null);
 
         setReviewRemarks(
             registration.remarks || ""
@@ -332,7 +586,30 @@ function GovernmentOfficerDashboard() {
 
     /*
      * --------------------------------------------------------------------------
-     * CLOSE REVIEW
+     * OPEN TRANSFER REVIEW
+     * --------------------------------------------------------------------------
+     */
+
+    function openTransferReview(
+        transfer: TransferRequest
+    ) {
+        setSelectedTransfer(
+            transfer
+        );
+
+        setSelectedRegistration(null);
+
+        setReviewRemarks(
+            transfer.remarks || ""
+        );
+
+        setError("");
+        setSuccess("");
+    }
+
+    /*
+     * --------------------------------------------------------------------------
+     * CLOSE REGISTRATION REVIEW
      * --------------------------------------------------------------------------
      */
 
@@ -344,6 +621,22 @@ function GovernmentOfficerDashboard() {
         setSelectedRegistration(
             null
         );
+
+        setReviewRemarks("");
+    }
+
+    /*
+     * --------------------------------------------------------------------------
+     * CLOSE TRANSFER REVIEW
+     * --------------------------------------------------------------------------
+     */
+
+    function closeTransferReview() {
+        if (isProcessing) {
+            return;
+        }
+
+        setSelectedTransfer(null);
 
         setReviewRemarks("");
     }
@@ -563,6 +856,211 @@ function GovernmentOfficerDashboard() {
 
     /*
      * --------------------------------------------------------------------------
+     * APPROVE TRANSFER
+     * --------------------------------------------------------------------------
+     */
+
+    async function approveTransfer() {
+        if (!selectedTransfer) {
+            return;
+        }
+
+        const token = getAuthToken();
+
+        if (!token) {
+            clearAuthData();
+
+            navigate("/login", {
+                replace: true,
+            });
+
+            return;
+        }
+
+        try {
+            setIsProcessing(true);
+            setError("");
+            setSuccess("");
+
+            const response =
+                await fetch(
+                    `${API_BASE_URL}/property-transfer-requests/${selectedTransfer.id}/approve`,
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json",
+
+                            Authorization:
+                                `Bearer ${token}`,
+                        },
+
+                        body: JSON.stringify({
+                            remarks:
+                                reviewRemarks.trim(),
+                        }),
+                    }
+                );
+
+            const data =
+                await response.json();
+
+            if (!response.ok) {
+                if (
+                    response.status ===
+                    401
+                ) {
+                    clearAuthData();
+
+                    navigate("/login", {
+                        replace: true,
+                    });
+
+                    return;
+                }
+
+                throw new Error(
+                    data.message ||
+                    "Failed to approve transfer request"
+                );
+            }
+
+            setSuccess(
+                "Property transfer approved successfully. Ownership has been transferred."
+            );
+
+            setSelectedTransfer(null);
+
+            setReviewRemarks("");
+
+            await loadTransferRequests();
+        } catch (err) {
+            console.error(
+                "Transfer approval error:",
+                err
+            );
+
+            setError(
+                err instanceof Error
+                    ? err.message
+                    : "Failed to approve transfer request"
+            );
+        } finally {
+            setIsProcessing(false);
+        }
+    }
+
+    /*
+     * --------------------------------------------------------------------------
+     * REJECT TRANSFER
+     * --------------------------------------------------------------------------
+     */
+
+    async function rejectTransfer() {
+        if (!selectedTransfer) {
+            return;
+        }
+
+        const token = getAuthToken();
+
+        if (!token) {
+            clearAuthData();
+
+            navigate("/login", {
+                replace: true,
+            });
+
+            return;
+        }
+
+        const cleanRemarks =
+            reviewRemarks.trim();
+
+        if (!cleanRemarks) {
+            setError(
+                "Remarks are required when rejecting a transfer request."
+            );
+
+            return;
+        }
+
+        try {
+            setIsProcessing(true);
+            setError("");
+            setSuccess("");
+
+            const response =
+                await fetch(
+                    `${API_BASE_URL}/property-transfer-requests/${selectedTransfer.id}/reject`,
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json",
+
+                            Authorization:
+                                `Bearer ${token}`,
+                        },
+
+                        body: JSON.stringify({
+                            remarks:
+                                cleanRemarks,
+                        }),
+                    }
+                );
+
+            const data =
+                await response.json();
+
+            if (!response.ok) {
+                if (
+                    response.status ===
+                    401
+                ) {
+                    clearAuthData();
+
+                    navigate("/login", {
+                        replace: true,
+                    });
+
+                    return;
+                }
+
+                throw new Error(
+                    data.message ||
+                    "Failed to reject transfer request"
+                );
+            }
+
+            setSuccess(
+                "Property transfer request rejected successfully."
+            );
+
+            setSelectedTransfer(null);
+
+            setReviewRemarks("");
+
+            await loadTransferRequests();
+        } catch (err) {
+            console.error(
+                "Transfer rejection error:",
+                err
+            );
+
+            setError(
+                err instanceof Error
+                    ? err.message
+                    : "Failed to reject transfer request"
+            );
+        } finally {
+            setIsProcessing(false);
+        }
+    }
+
+    /*
+     * --------------------------------------------------------------------------
      * FORMAT DATE
      * --------------------------------------------------------------------------
      */
@@ -600,7 +1098,9 @@ function GovernmentOfficerDashboard() {
      */
 
     function statusLabel(
-        status: RegistrationStatus
+        status:
+            | RegistrationStatus
+            | TransferStatus
     ) {
         switch (status) {
             case "PENDING":
@@ -672,7 +1172,7 @@ function GovernmentOfficerDashboard() {
                     <p>
                         Review, verify and manage
                         digital property registration
-                        requests.
+                        and ownership transfer requests.
                     </p>
                 </div>
 
@@ -745,7 +1245,7 @@ function GovernmentOfficerDashboard() {
             )}
 
             {/* ================================================================
-                STATISTICS
+                REGISTRATION STATISTICS
             ================================================================= */}
 
             <section className="gov-stat-grid">
@@ -765,7 +1265,7 @@ function GovernmentOfficerDashboard() {
 
                     <div>
                         <span>
-                            Total Requests
+                            Registration Requests
                         </span>
 
                         <strong>
@@ -789,7 +1289,7 @@ function GovernmentOfficerDashboard() {
 
                     <div>
                         <span>
-                            Pending Review
+                            Pending Registration
                         </span>
 
                         <strong>
@@ -872,16 +1372,17 @@ function GovernmentOfficerDashboard() {
                         type="button"
                         className="gov-refresh-button"
                         onClick={() =>
-                            void loadRegistrations()
+                            void refreshDashboard()
                         }
-                        disabled={isLoading}
+                        disabled={
+                            isLoading ||
+                            isTransferLoading
+                        }
                     >
                         ↻ Refresh
                     </button>
 
                 </div>
-
-                {/* Filters */}
 
                 <div className="gov-filters">
 
@@ -943,8 +1444,6 @@ function GovernmentOfficerDashboard() {
                     )}
 
                 </div>
-
-                {/* Table */}
 
                 {isLoading ? (
                     <div className="gov-empty">
@@ -1139,7 +1638,414 @@ function GovernmentOfficerDashboard() {
             </section>
 
             {/* ================================================================
-                REVIEW MODAL
+                TRANSFER STATISTICS
+            ================================================================= */}
+
+            <section className="gov-stat-grid">
+
+                <button
+                    type="button"
+                    className="gov-stat-card"
+                    onClick={() =>
+                        setTransferFilter(
+                            "ALL"
+                        )
+                    }
+                >
+                    <div className="gov-stat-icon">
+                        ⇄
+                    </div>
+
+                    <div>
+                        <span>
+                            Transfer Requests
+                        </span>
+
+                        <strong>
+                            {transferStatistics.total}
+                        </strong>
+                    </div>
+                </button>
+
+                <button
+                    type="button"
+                    className="gov-stat-card gov-stat-pending"
+                    onClick={() =>
+                        setTransferFilter(
+                            "PENDING"
+                        )
+                    }
+                >
+                    <div className="gov-stat-icon">
+                        ⏳
+                    </div>
+
+                    <div>
+                        <span>
+                            Pending Transfers
+                        </span>
+
+                        <strong>
+                            {transferStatistics.pending}
+                        </strong>
+                    </div>
+                </button>
+
+                <button
+                    type="button"
+                    className="gov-stat-card gov-stat-approved"
+                    onClick={() =>
+                        setTransferFilter(
+                            "APPROVED"
+                        )
+                    }
+                >
+                    <div className="gov-stat-icon">
+                        ✓
+                    </div>
+
+                    <div>
+                        <span>
+                            Approved Transfers
+                        </span>
+
+                        <strong>
+                            {transferStatistics.approved}
+                        </strong>
+                    </div>
+                </button>
+
+                <button
+                    type="button"
+                    className="gov-stat-card gov-stat-rejected"
+                    onClick={() =>
+                        setTransferFilter(
+                            "REJECTED"
+                        )
+                    }
+                >
+                    <div className="gov-stat-icon">
+                        ×
+                    </div>
+
+                    <div>
+                        <span>
+                            Rejected Transfers
+                        </span>
+
+                        <strong>
+                            {transferStatistics.rejected}
+                        </strong>
+                    </div>
+                </button>
+
+            </section>
+
+            {/* ================================================================
+                TRANSFER REQUESTS
+            ================================================================= */}
+
+            <section className="gov-panel">
+
+                <div className="gov-panel-header">
+
+                    <div>
+                        <h2>
+                            Property Transfer
+                            Requests
+                        </h2>
+
+                        <p>
+                            Review ownership transfer
+                            requests submitted by citizens.
+                        </p>
+                    </div>
+
+                    <button
+                        type="button"
+                        className="gov-refresh-button"
+                        onClick={() =>
+                            void loadTransferRequests()
+                        }
+                        disabled={
+                            isTransferLoading
+                        }
+                    >
+                        ↻ Refresh Transfers
+                    </button>
+
+                </div>
+
+                {/* Transfer filters */}
+
+                <div className="gov-filters">
+
+                    {(
+                        [
+                            ["ALL", "All"],
+                            [
+                                "PENDING",
+                                "Pending",
+                            ],
+                            [
+                                "APPROVED",
+                                "Approved",
+                            ],
+                            [
+                                "REJECTED",
+                                "Rejected",
+                            ],
+                        ] as [
+                            TransferFilterType,
+                            string
+                        ][]
+                    ).map(
+                        ([
+                            value,
+                            label,
+                        ]) => (
+                            <button
+                                type="button"
+                                key={value}
+                                className={
+                                    transferFilter ===
+                                    value
+                                        ? "gov-filter active"
+                                        : "gov-filter"
+                                }
+                                onClick={() =>
+                                    setTransferFilter(
+                                        value
+                                    )
+                                }
+                            >
+                                {label}
+
+                                <span>
+                                    {value ===
+                                    "ALL"
+                                        ? transferStatistics.total
+                                        : value ===
+                                            "PENDING"
+                                            ? transferStatistics.pending
+                                            : value ===
+                                                "APPROVED"
+                                                ? transferStatistics.approved
+                                                : transferStatistics.rejected}
+                                </span>
+                            </button>
+                        )
+                    )}
+
+                </div>
+
+                {isTransferLoading ? (
+                    <div className="gov-empty">
+
+                        <div className="gov-spinner" />
+
+                        <p>
+                            Loading transfer
+                            requests...
+                        </p>
+
+                    </div>
+                ) : filteredTransfers.length ===
+                    0 ? (
+                    <div className="gov-empty">
+
+                        <div className="gov-empty-icon">
+                            ✓
+                        </div>
+
+                        <h3>
+                            No transfer requests
+                        </h3>
+
+                        <p>
+                            There are no ownership
+                            transfer requests in this category.
+                        </p>
+
+                    </div>
+                ) : (
+                    <div className="gov-table-wrapper">
+
+                        <table className="gov-table">
+
+                            <thead>
+                                <tr>
+
+                                    <th>
+                                        Property
+                                    </th>
+
+                                    <th>
+                                        VPID
+                                    </th>
+
+                                    <th>
+                                        Current Owner
+                                    </th>
+
+                                    <th>
+                                        New Owner
+                                    </th>
+
+                                    <th>
+                                        Transfer Date
+                                    </th>
+
+                                    <th>
+                                        Status
+                                    </th>
+
+                                    <th>
+                                        Action
+                                    </th>
+
+                                </tr>
+                            </thead>
+
+                            <tbody>
+
+                                {filteredTransfers.map(
+                                    (
+                                        transfer
+                                    ) => (
+                                        <tr
+                                            key={
+                                                transfer.id
+                                            }
+                                        >
+
+                                            <td>
+                                                <div className="gov-property-cell">
+
+                                                    <strong>
+                                                        Unit{" "}
+                                                        {
+                                                            transfer.unit_number
+                                                        }
+                                                    </strong>
+
+                                                    <span>
+                                                        {
+                                                            transfer.building_name
+                                                        }
+                                                        {" • "}
+                                                        {
+                                                            transfer.floor_label
+                                                        }
+                                                    </span>
+
+                                                </div>
+                                            </td>
+
+                                            <td>
+                                                <code>
+                                                    {
+                                                        transfer.vertical_property_id
+                                                    }
+                                                </code>
+                                            </td>
+
+                                            <td>
+                                                <div className="gov-owner-table-cell">
+
+                                                    <strong>
+                                                        {
+                                                            transfer.current_owner_name
+                                                        }
+                                                    </strong>
+
+                                                    {transfer.current_owner_contact && (
+                                                        <span>
+                                                            {
+                                                                transfer.current_owner_contact
+                                                            }
+                                                        </span>
+                                                    )}
+
+                                                </div>
+                                            </td>
+
+                                            <td>
+                                                <div className="gov-owner-table-cell">
+
+                                                    <strong>
+                                                        {
+                                                            transfer.new_owner_name
+                                                        }
+                                                    </strong>
+
+                                                    {transfer.new_owner_contact && (
+                                                        <span>
+                                                            {
+                                                                transfer.new_owner_contact
+                                                            }
+                                                        </span>
+                                                    )}
+
+                                                </div>
+                                            </td>
+
+                                            <td>
+                                                {formatDate(
+                                                    transfer.transfer_date
+                                                )}
+                                            </td>
+
+                                            <td>
+                                                <span
+                                                    className={`gov-status gov-status-${transfer.status.toLowerCase()}`}
+                                                >
+                                                    <i />
+
+                                                    {
+                                                        statusLabel(
+                                                            transfer.status
+                                                        )
+                                                    }
+                                                </span>
+                                            </td>
+
+                                            <td>
+                                                <button
+                                                    type="button"
+                                                    className="gov-review-button"
+                                                    onClick={() =>
+                                                        openTransferReview(
+                                                            transfer
+                                                        )
+                                                    }
+                                                >
+                                                    {transfer.status ===
+                                                    "PENDING"
+                                                        ? "Review"
+                                                        : "View"}
+
+                                                    <span>
+                                                        →
+                                                    </span>
+                                                </button>
+                                            </td>
+
+                                        </tr>
+                                    )
+                                )}
+
+                            </tbody>
+
+                        </table>
+
+                    </div>
+                )}
+
+            </section>
+
+            {/* ================================================================
+                REGISTRATION REVIEW MODAL
             ================================================================= */}
 
             {selectedRegistration && (
@@ -1158,8 +2064,6 @@ function GovernmentOfficerDashboard() {
                 >
 
                     <div className="gov-modal">
-
-                        {/* Modal Header */}
 
                         <div className="gov-modal-header">
 
@@ -1188,8 +2092,6 @@ function GovernmentOfficerDashboard() {
 
                         </div>
 
-                        {/* Property Identity */}
-
                         <div className="gov-vpid-card">
 
                             <span>
@@ -1211,8 +2113,6 @@ function GovernmentOfficerDashboard() {
                             </small>
 
                         </div>
-
-                        {/* Property Details */}
 
                         <div className="gov-detail-grid">
 
@@ -1273,8 +2173,6 @@ function GovernmentOfficerDashboard() {
                             </div>
 
                         </div>
-
-                        {/* Ownership */}
 
                         <div className="gov-section">
 
@@ -1366,8 +2264,6 @@ function GovernmentOfficerDashboard() {
 
                         </div>
 
-                        {/* Submission Details */}
-
                         <div className="gov-section">
 
                             <h3>
@@ -1417,8 +2313,6 @@ function GovernmentOfficerDashboard() {
                             </div>
 
                         </div>
-
-                        {/* Review Details */}
 
                         {(selectedRegistration.reviewed_by_name ||
                             selectedRegistration.reviewed_at) && (
@@ -1480,8 +2374,6 @@ function GovernmentOfficerDashboard() {
                             </div>
                         )}
 
-                        {/* Property Identifiers */}
-
                         <div className="gov-section">
 
                             <h3>
@@ -1530,8 +2422,6 @@ function GovernmentOfficerDashboard() {
 
                         </div>
 
-                        {/* Remarks */}
-
                         <div className="gov-section">
 
                             <label htmlFor="review-remarks">
@@ -1564,8 +2454,6 @@ function GovernmentOfficerDashboard() {
                             />
 
                         </div>
-
-                        {/* Actions */}
 
                         {selectedRegistration.status ===
                         "PENDING" ? (
@@ -1608,6 +2496,420 @@ function GovernmentOfficerDashboard() {
                                 has already been{" "}
                                 <strong>
                                     {selectedRegistration.status.toLowerCase()}
+                                </strong>
+                                .
+                            </div>
+                        )}
+
+                    </div>
+
+                </div>
+            )}
+
+            {/* ================================================================
+                TRANSFER REVIEW MODAL
+            ================================================================= */}
+
+            {selectedTransfer && (
+                <div
+                    className="gov-modal-backdrop"
+                    onMouseDown={(
+                        event
+                    ) => {
+                        if (
+                            event.target ===
+                            event.currentTarget
+                        ) {
+                            closeTransferReview();
+                        }
+                    }}
+                >
+
+                    <div className="gov-modal">
+
+                        <div className="gov-modal-header">
+
+                            <div>
+                                <span>
+                                    OWNERSHIP TRANSFER
+                                </span>
+
+                                <h2>
+                                    Review Transfer Request
+                                </h2>
+                            </div>
+
+                            <button
+                                type="button"
+                                className="gov-close-button"
+                                onClick={
+                                    closeTransferReview
+                                }
+                                disabled={
+                                    isProcessing
+                                }
+                            >
+                                ×
+                            </button>
+
+                        </div>
+
+                        {/* VPID */}
+
+                        <div className="gov-vpid-card">
+
+                            <span>
+                                VERTICAL PROPERTY
+                                IDENTIFIER
+                            </span>
+
+                            <strong>
+                                {
+                                    selectedTransfer.vertical_property_id
+                                }
+                            </strong>
+
+                            <small>
+                                ULPIN:{" "}
+                                {
+                                    selectedTransfer.parent_ulpin
+                                }
+                            </small>
+
+                        </div>
+
+                        {/* Property details */}
+
+                        <div className="gov-detail-grid">
+
+                            <div>
+                                <span>
+                                    Building
+                                </span>
+
+                                <strong>
+                                    {
+                                        selectedTransfer.building_name
+                                    }
+                                </strong>
+                            </div>
+
+                            <div>
+                                <span>
+                                    Floor
+                                </span>
+
+                                <strong>
+                                    {
+                                        selectedTransfer.floor_label
+                                    }
+                                </strong>
+                            </div>
+
+                            <div>
+                                <span>
+                                    Unit
+                                </span>
+
+                                <strong>
+                                    {
+                                        selectedTransfer.unit_number
+                                    }
+                                </strong>
+                            </div>
+
+                            <div>
+                                <span>
+                                    Transfer Date
+                                </span>
+
+                                <strong>
+                                    {formatDate(
+                                        selectedTransfer.transfer_date
+                                    )}
+                                </strong>
+                            </div>
+
+                        </div>
+
+                        {/* Ownership transfer */}
+
+                        <div className="gov-section">
+
+                            <h3>
+                                Ownership Transfer
+                            </h3>
+
+                            <div className="gov-detail-grid">
+
+                                <div>
+                                    <span>
+                                        Current Owner
+                                    </span>
+
+                                    <strong>
+                                        {
+                                            selectedTransfer.current_owner_name
+                                        }
+                                    </strong>
+
+                                    {selectedTransfer.current_owner_contact && (
+                                        <small>
+                                            {
+                                                selectedTransfer.current_owner_contact
+                                            }
+                                        </small>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <span>
+                                        New Owner
+                                    </span>
+
+                                    <strong>
+                                        {
+                                            selectedTransfer.new_owner_name
+                                        }
+                                    </strong>
+
+                                    {selectedTransfer.new_owner_contact && (
+                                        <small>
+                                            {
+                                                selectedTransfer.new_owner_contact
+                                            }
+                                        </small>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <span>
+                                        Ownership
+                                    </span>
+
+                                    <strong>
+                                        {
+                                            selectedTransfer.ownership_percentage
+                                        }
+                                        %
+                                    </strong>
+                                </div>
+
+                                <div>
+                                    <span>
+                                        Status
+                                    </span>
+
+                                    <strong>
+                                        <span
+                                            className={`gov-status gov-status-${selectedTransfer.status.toLowerCase()}`}
+                                        >
+                                            <i />
+
+                                            {
+                                                statusLabel(
+                                                    selectedTransfer.status
+                                                )
+                                            }
+                                        </span>
+                                    </strong>
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                        {/* Request details */}
+
+                        <div className="gov-section">
+
+                            <h3>
+                                Request Details
+                            </h3>
+
+                            <div className="gov-submission-grid">
+
+                                <div>
+                                    <span>
+                                        Submitted By
+                                    </span>
+
+                                    <strong>
+                                        {
+                                            selectedTransfer.submitted_by_name ||
+                                            "Unknown"
+                                        }
+                                    </strong>
+                                </div>
+
+                                <div>
+                                    <span>
+                                        Submitted
+                                    </span>
+
+                                    <strong>
+                                        {formatDate(
+                                            selectedTransfer.submitted_at
+                                        )}
+                                    </strong>
+                                </div>
+
+                                <div>
+                                    <span>
+                                        Request ID
+                                    </span>
+
+                                    <strong>
+                                        {
+                                            selectedTransfer.id
+                                        }
+                                    </strong>
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                        {/* Review details */}
+
+                        {(selectedTransfer.reviewed_by_name ||
+                            selectedTransfer.reviewed_at) && (
+                            <div className="gov-section">
+
+                                <h3>
+                                    Review Details
+                                </h3>
+
+                                <div className="gov-submission-grid">
+
+                                    <div>
+                                        <span>
+                                            Reviewed By
+                                        </span>
+
+                                        <strong>
+                                            {
+                                                selectedTransfer.reviewed_by_name ||
+                                                "Unknown"
+                                            }
+                                        </strong>
+                                    </div>
+
+                                    <div>
+                                        <span>
+                                            Reviewed
+                                        </span>
+
+                                        <strong>
+                                            {formatDate(
+                                                selectedTransfer.reviewed_at
+                                            )}
+                                        </strong>
+                                    </div>
+
+                                    <div>
+                                        <span>
+                                            Final Status
+                                        </span>
+
+                                        <strong>
+                                            <span
+                                                className={`gov-status gov-status-${selectedTransfer.status.toLowerCase()}`}
+                                            >
+                                                <i />
+
+                                                {
+                                                    statusLabel(
+                                                        selectedTransfer.status
+                                                    )
+                                                }
+                                            </span>
+                                        </strong>
+                                    </div>
+
+                                </div>
+
+                            </div>
+                        )}
+
+                        {/* Remarks */}
+
+                        <div className="gov-section">
+
+                            <label htmlFor="transfer-review-remarks">
+                                Officer Remarks
+                            </label>
+
+                            <textarea
+                                id="transfer-review-remarks"
+                                value={
+                                    reviewRemarks
+                                }
+                                onChange={(
+                                    event
+                                ) =>
+                                    setReviewRemarks(
+                                        event.target.value
+                                    )
+                                }
+                                placeholder={
+                                    selectedTransfer.status ===
+                                    "PENDING"
+                                        ? "Enter transfer verification remarks..."
+                                        : "Review remarks..."
+                                }
+                                disabled={
+                                    selectedTransfer.status !==
+                                        "PENDING" ||
+                                    isProcessing
+                                }
+                            />
+
+                        </div>
+
+                        {/* Actions */}
+
+                        {selectedTransfer.status ===
+                        "PENDING" ? (
+                            <div className="gov-modal-actions">
+
+                                <button
+                                    type="button"
+                                    className="gov-reject-button"
+                                    onClick={() =>
+                                        void rejectTransfer()
+                                    }
+                                    disabled={
+                                        isProcessing
+                                    }
+                                >
+                                    {isProcessing
+                                        ? "Processing..."
+                                        : "Reject Transfer"}
+                                </button>
+
+                                <button
+                                    type="button"
+                                    className="gov-approve-button"
+                                    onClick={() =>
+                                        void approveTransfer()
+                                    }
+                                    disabled={
+                                        isProcessing
+                                    }
+                                >
+                                    {isProcessing
+                                        ? "Processing..."
+                                        : "✓ Approve Transfer"}
+                                </button>
+
+                            </div>
+                        ) : (
+                            <div className="gov-modal-footer-status">
+                                This transfer request
+                                has already been{" "}
+                                <strong>
+                                    {selectedTransfer.status.toLowerCase()}
                                 </strong>
                                 .
                             </div>

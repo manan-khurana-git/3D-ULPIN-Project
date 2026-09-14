@@ -98,11 +98,33 @@ type AvailablePropertyUnit = {
     building_id: string;
     building_name: string;
     parcel_number: string;
+    state?: string | null;
 };
 
 type AvailablePropertyResponse = {
     status: string;
     property_units: AvailablePropertyUnit[];
+};
+
+type AllPropertyUnitResponse = {
+    status: string;
+    property_units: AvailablePropertyUnit[];
+};
+
+type BuildingAddressResponse = {
+    status?: string;
+    building?: {
+        id?: string;
+        state?: string | null;
+    };
+    data?: {
+        building?: {
+            id?: string;
+            state?: string | null;
+        };
+        state?: string | null;
+    };
+    state?: string | null;
 };
 
 type OwnershipHistoryRecord = {
@@ -256,6 +278,48 @@ function statusClass(status: RegistrationStatus) {
     }
 }
 
+function auditActionLabel(action: string) {
+    switch (action) {
+        case "CITIZEN_REGISTRATION_SUBMITTED":
+            return "Registration Submitted";
+
+        case "REGISTRATION_APPROVED":
+            return "Registration Approved";
+
+        case "REGISTRATION_REJECTED":
+            return "Registration Rejected";
+
+        case "TRANSFER_REQUEST_SUBMITTED":
+            return "Transfer Request Submitted";
+
+        case "TRANSFER_REQUEST_APPROVED":
+            return "Transfer Request Approved";
+
+        case "TRANSFER_REQUEST_REJECTED":
+            return "Transfer Request Rejected";
+
+        default:
+            return action
+                .replace(/_/g, " ")
+                .toLowerCase()
+                .replace(/\b\w/g, (letter) =>
+                    letter.toUpperCase()
+                );
+    }
+}
+
+function isTransferredRegistration(
+    registration: CitizenRegistration,
+    currentOwnership: OwnershipHistoryRecord | null | undefined
+) {
+    return (
+        registration.status === "APPROVED" &&
+        !!registration.owner &&
+        !!currentOwnership &&
+        currentOwnership.owner_id !== registration.owner.id
+    );
+}
+
 function StatIcon({
     type,
 }: {
@@ -368,6 +432,9 @@ function CitizenDashboard() {
     const [selectedRegistration, setSelectedRegistration] =
         useState<CitizenRegistration | null>(null);
 
+    const [currentOwnershipByPropertyUnitId, setCurrentOwnershipByPropertyUnitId] =
+        useState<Record<string, OwnershipHistoryRecord | null>>({});
+
     const [propertyHistory, setPropertyHistory] =
         useState<PropertyHistoryResponse | null>(null);
 
@@ -414,11 +481,20 @@ function CitizenDashboard() {
     const [availableProperties, setAvailableProperties] =
         useState<AvailablePropertyUnit[]>([]);
 
+    const [allPropertyUnits, setAllPropertyUnits] =
+        useState<AvailablePropertyUnit[]>([]);
+
+    const [buildingStates, setBuildingStates] =
+        useState<Record<string, string>>({});
+
     const [isLoadingAvailable, setIsLoadingAvailable] =
         useState(false);
 
     const [showAllAvailableProperties, setShowAllAvailableProperties] =
         useState(false);
+
+    const [selectedAvailableBuildingId, setSelectedAvailableBuildingId] =
+        useState<string | null>(null);
 
     const [selectedAvailableProperty, setSelectedAvailableProperty] =
         useState<AvailablePropertyUnit | null>(null);
@@ -433,6 +509,85 @@ function CitizenDashboard() {
 
     const [isSubmittingRegistration, setIsSubmittingRegistration] =
         useState(false);
+
+    const loadCurrentOwnerships = useCallback(
+        async (
+            propertyRegistrations: CitizenRegistration[],
+            token: string
+        ) => {
+            const approvedRegistrations =
+                propertyRegistrations.filter(
+                    (registration) =>
+                        registration.status === "APPROVED"
+                );
+
+            if (approvedRegistrations.length === 0) {
+                setCurrentOwnershipByPropertyUnitId({});
+                return;
+            }
+
+            const ownershipEntries = await Promise.all(
+                approvedRegistrations.map(
+                    async (registration) => {
+                        try {
+                            const response = await fetch(
+                                `${API_BASE_URL}/property-units/${encodeURIComponent(
+                                    registration.property.vertical_property_id
+                                )}/history`,
+                                {
+                                    method: "GET",
+                                    headers: {
+                                        Authorization: `Bearer ${token}`,
+                                    },
+                                }
+                            );
+
+                            if (response.status === 401) {
+                                clearAuthData();
+                                navigate("/login", {
+                                    replace: true,
+                                });
+                                return [
+                                    registration.property_unit_id,
+                                    null,
+                                ] as const;
+                            }
+
+                            if (!response.ok) {
+                                return [
+                                    registration.property_unit_id,
+                                    null,
+                                ] as const;
+                            }
+
+                            const data =
+                                (await response.json()) as PropertyHistoryResponse;
+
+                            return [
+                                registration.property_unit_id,
+                                data.current_owner ?? null,
+                            ] as const;
+                        } catch (requestError) {
+                            console.error(
+                                `Current ownership loading error for ${registration.property.vertical_property_id}:`,
+                                requestError
+                            );
+
+                            return [
+                                registration.property_unit_id,
+                                null,
+                            ] as const;
+                        }
+                    }
+                )
+            );
+
+            setCurrentOwnershipByPropertyUnitId(
+                Object.fromEntries(ownershipEntries)
+            );
+        },
+        [navigate]
+    );
 
     const loadRegistrations = useCallback(
         async (showRefreshing = false) => {
@@ -451,6 +606,7 @@ function CitizenDashboard() {
             }
 
             setError("");
+            setCurrentOwnershipByPropertyUnitId({});
 
             try {
                 const response = await fetch(
@@ -501,6 +657,11 @@ function CitizenDashboard() {
                         rejected: 0,
                     }
                 );
+
+                await loadCurrentOwnerships(
+                    successData.registrations ?? [],
+                    token
+                );
             } catch (requestError) {
                 console.error(
                     "Citizen property loading error:",
@@ -517,7 +678,7 @@ function CitizenDashboard() {
                 setIsRefreshing(false);
             }
         },
-        [navigate]
+        [loadCurrentOwnerships, navigate]
     );
 
     const loadAvailableProperties = useCallback(async () => {
@@ -533,52 +694,156 @@ function CitizenDashboard() {
         setError("");
 
         try {
-            const response = await fetch(
-                `${API_BASE_URL}/property-units/available`,
-                {
-                    method: "GET",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
-                }
-            );
+            const [availableResponse, allUnitsResponse] =
+                await Promise.all([
+                    fetch(
+                        `${API_BASE_URL}/property-units/available`,
+                        {
+                            method: "GET",
+                            headers: {
+                                Authorization: `Bearer ${token}`,
+                            },
+                        }
+                    ),
+                    fetch(
+                        `${API_BASE_URL}/property-units`,
+                        {
+                            method: "GET",
+                            headers: {
+                                Authorization: `Bearer ${token}`,
+                            },
+                        }
+                    ),
+                ]);
 
-            const data =
-                (await response.json()) as
+            const availableData =
+                (await availableResponse.json()) as
                 | AvailablePropertyResponse
-                | {
-                    message?: string;
-                };
+                | { message?: string };
 
-            if (!response.ok) {
-                if (response.status === 401) {
-                    clearAuthData();
-                    navigate("/login", {
-                        replace: true,
-                    });
-                    return;
-                }
+            const allUnitsData =
+                (await allUnitsResponse.json()) as
+                | AllPropertyUnitResponse
+                | { message?: string };
 
-                if (response.status === 403) {
+            if (
+                availableResponse.status === 401 ||
+                allUnitsResponse.status === 401
+            ) {
+                clearAuthData();
+                navigate("/login", { replace: true });
+                return;
+            }
+
+            if (!availableResponse.ok) {
+                if (availableResponse.status === 403) {
                     throw new Error(
                         "Only citizen accounts can view available properties."
                     );
                 }
 
                 throw new Error(
-                    "message" in data && data.message
-                        ? data.message
+                    "message" in availableData &&
+                    availableData.message
+                        ? availableData.message
                         : "Failed to load available properties"
                 );
             }
 
-            const successData =
-                data as AvailablePropertyResponse;
+            if (!allUnitsResponse.ok) {
+                throw new Error(
+                    "message" in allUnitsData &&
+                    allUnitsData.message
+                        ? allUnitsData.message
+                        : "Failed to load property units"
+                );
+            }
 
-            setAvailableProperties(
-                successData.property_units ?? []
-            );
+            const availableUnitData =
+                availableData as AvailablePropertyResponse;
+            const allUnitData =
+                allUnitsData as AllPropertyUnitResponse;
+
+            const availableUnits =
+                availableUnitData.property_units ?? [];
+            const allUnits =
+                allUnitData.property_units ?? [];
+
+            setAvailableProperties(availableUnits);
+            setAllPropertyUnits(allUnits);
             setShowAllAvailableProperties(false);
+            setSelectedAvailableBuildingId(null);
+
+            const uniqueBuildings = Array.from(
+                new Map(
+                    allUnits.map((property) => [
+                        property.building_id,
+                        property,
+                    ])
+                ).values()
+            );
+
+            const stateEntries = await Promise.all(
+                uniqueBuildings.map(async (property) => {
+                    if (property.state?.trim()) {
+                        return [
+                            property.building_id,
+                            property.state.trim(),
+                        ] as const;
+                    }
+
+                    try {
+                        const buildingResponse =
+                            await fetch(
+                                `${API_BASE_URL}/buildings/${encodeURIComponent(
+                                    property.building_id
+                                )}`,
+                                {
+                                    method: "GET",
+                                    headers: {
+                                        Authorization: `Bearer ${token}`,
+                                    },
+                                }
+                            );
+
+                        if (!buildingResponse.ok) {
+                            return [
+                                property.building_id,
+                                "State Not Available",
+                            ] as const;
+                        }
+
+                        const buildingData =
+                            (await buildingResponse.json()) as BuildingAddressResponse;
+
+                        const state =
+                            buildingData.building?.state ??
+                            buildingData.data?.building?.state ??
+                            buildingData.data?.state ??
+                            buildingData.state ??
+                            null;
+
+                        return [
+                            property.building_id,
+                            state?.trim() || "State Not Available",
+                        ] as const;
+                    } catch (buildingError) {
+                        console.error(
+                            `Building state loading error for ${property.building_id}:`,
+                            buildingError
+                        );
+
+                        return [
+                            property.building_id,
+                            "State Not Available",
+                        ] as const;
+                    }
+                })
+            );
+
+            setBuildingStates(
+                Object.fromEntries(stateEntries)
+            );
         } catch (requestError) {
             console.error(
                 "Available property loading error:",
@@ -757,14 +1022,87 @@ function CitizenDashboard() {
         );
     }, [filter, registrations]);
 
-    const visibleAvailableProperties = useMemo(() => {
+    const availableUnitIds = useMemo(
+        () =>
+            new Set(
+                availableProperties.map(
+                    (property) => property.id
+                )
+            ),
+        [availableProperties]
+    );
+
+    const availableBuildings = useMemo(() => {
+        const grouped = new Map<
+            string,
+            {
+                buildingId: string;
+                buildingName: string;
+                state: string;
+                ulpin: string;
+                parcelNumber: string;
+                units: AvailablePropertyUnit[];
+            }
+        >();
+
+        allPropertyUnits.forEach((property) => {
+            const existing = grouped.get(
+                property.building_id
+            );
+
+            if (existing) {
+                existing.units.push(property);
+                return;
+            }
+
+            grouped.set(property.building_id, {
+                buildingId: property.building_id,
+                buildingName: property.building_name,
+                state:
+                    buildingStates[property.building_id] ??
+                    property.state?.trim() ??
+                    "State Not Available",
+                ulpin: property.parent_ulpin,
+                parcelNumber: property.parcel_number,
+                units: [property],
+            });
+        });
+
+        return Array.from(grouped.values())
+            .map((building) => ({
+                ...building,
+                units: [...building.units].sort(
+                    (a, b) =>
+                        a.floor_number - b.floor_number ||
+                        a.unit_number.localeCompare(
+                            b.unit_number,
+                            undefined,
+                            { numeric: true }
+                        )
+                ),
+                availableCount: building.units.filter(
+                    (unit) => availableUnitIds.has(unit.id)
+                ).length,
+            }))
+            .sort(
+                (a, b) =>
+                    a.state.localeCompare(b.state) ||
+                    a.buildingName.localeCompare(b.buildingName)
+            );
+    }, [
+        allPropertyUnits,
+        availableUnitIds,
+        buildingStates,
+    ]);
+
+    const visibleAvailableBuildings = useMemo(() => {
         if (showAllAvailableProperties) {
-            return availableProperties;
+            return availableBuildings;
         }
 
-        return availableProperties.slice(0, 4);
+        return availableBuildings.slice(0, 4);
     }, [
-        availableProperties,
+        availableBuildings,
         showAllAvailableProperties,
     ]);
 
@@ -850,6 +1188,21 @@ function CitizenDashboard() {
     const openTransferForm = (
         registration: CitizenRegistration
     ) => {
+        const currentOwnership =
+            currentOwnershipByPropertyUnitId[
+                registration.property_unit_id
+            ];
+
+        if (
+            registration.status !== "APPROVED" ||
+            !registration.owner ||
+            !currentOwnership ||
+            currentOwnership.owner_id !==
+                registration.owner.id
+        ) {
+            return;
+        }
+
         setTransferRegistration(registration);
         setTransferOwnerName("");
         setTransferOwnerContact("");
@@ -988,6 +1341,17 @@ const response = await fetch(
         registration: CitizenRegistration
     ) => {
         /*
+         * A transferred property no longer belongs to this citizen.
+         * Keep a defensive guard here in addition to hiding the UI button.
+         */
+        if (
+            registration.status !== "APPROVED" ||
+            isRegistrationTransferred(registration)
+        ) {
+            return;
+        }
+
+        /*
          * The existing 3D explorer remains at /dashboard.
          * The selected VPID is passed through the URL so it can
          * be integrated with the Cesium explorer later.
@@ -998,6 +1362,48 @@ const response = await fetch(
             )}`
         );
     };
+
+    const getCurrentOwner = (
+        registration: CitizenRegistration
+    ) =>
+        currentOwnershipByPropertyUnitId[
+            registration.property_unit_id
+        ] ?? null;
+
+    const getDisplayOwner = (
+        registration: CitizenRegistration
+    ) => {
+        const currentOwner = getCurrentOwner(
+            registration
+        );
+
+        if (currentOwner) {
+            return {
+                id: currentOwner.owner_id,
+                name: currentOwner.name,
+                contact: currentOwner.contact,
+                percentage:
+                    currentOwner.ownership_percentage,
+            };
+        }
+
+        return {
+            id: registration.owner?.id ?? "",
+            name: registration.owner?.name ?? "Not assigned",
+            contact: registration.owner?.contact ?? null,
+            percentage: Number(
+                registration.ownership?.percentage ?? 0
+            ),
+        };
+    };
+
+    const isRegistrationTransferred = (
+        registration: CitizenRegistration
+    ) =>
+        isTransferredRegistration(
+            registration,
+            getCurrentOwner(registration)
+        );
 
     return (
         <div className="citizen-page">
@@ -1182,9 +1588,8 @@ const response = await fetch(
                             </h2>
 
                             <p>
-                                Select an unregistered property
-                                unit and submit it for government
-                                verification.
+                                Choose a building first, then select
+                                an apartment for registration.
                             </p>
                         </div>
 
@@ -1214,27 +1619,21 @@ const response = await fetch(
                                     strokeWidth="1.7"
                                 />
                             </svg>
-                            {isLoadingAvailable
-                                ? "Loading..."
-                                : "Refresh"}
+                            {isLoadingAvailable ? "Loading..." : "Refresh"}
                         </button>
                     </div>
 
                     {isLoadingAvailable ? (
                         <div className="property-loading">
                             <div className="loading-spinner" />
-
                             <span>
-                                Loading available properties...
+                                Loading buildings and apartments...
                             </span>
                         </div>
-                    ) : availableProperties.length === 0 ? (
+                    ) : availableBuildings.length === 0 ? (
                         <div className="empty-properties">
                             <div className="empty-icon">
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    aria-hidden="true"
-                                >
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path
                                         d="M4 8.5 12 4l8 4.5v8L12 21l-8-4.5v-8Z"
                                         fill="none"
@@ -1251,201 +1650,374 @@ const response = await fetch(
                                     />
                                 </svg>
                             </div>
-
-                            <h3>
-                                No available properties
-                            </h3>
-
+                            <h3>No buildings available</h3>
                             <p>
-                                There are currently no unregistered
-                                property units available for
-                                citizen registration.
+                                There are currently no generated property
+                                units available in the property registry.
                             </p>
                         </div>
                     ) : (
-                        <div className="property-grid">
-                            {visibleAvailableProperties.map(
-                                (property) => (
-                                    <article
-                                        key={property.id}
-                                        className="property-card"
-                                    >
-                                        <div className="property-card-top">
-                                            <div className="property-status status-neutral">
-                                                <span className="status-dot" />
-                                                Available
-                                            </div>
-
-                                            <div className="registration-number">
-                                                Unit{" "}
-                                                {property.unit_number}
-                                            </div>
-                                        </div>
-
-                                        <div className="property-main">
-                                            <div className="property-building-icon">
-                                                <svg
-                                                    viewBox="0 0 32 32"
-                                                    aria-hidden="true"
-                                                >
-                                                    <path
-                                                        d="M7 27V7.5L16 4l9 3.5V27"
-                                                        fill="none"
-                                                        stroke="currentColor"
-                                                        strokeLinejoin="round"
-                                                        strokeWidth="1.6"
-                                                    />
-                                                    <path
-                                                        d="M11 10h2M19 10h2M11 15h2M19 15h2M11 20h2M19 20h2M14 27v-4h4v4"
-                                                        fill="none"
-                                                        stroke="currentColor"
-                                                        strokeLinecap="round"
-                                                        strokeWidth="1.5"
-                                                    />
-                                                </svg>
-                                            </div>
-
-                                            <div className="property-title">
-                                                <h3>
-                                                    {
-                                                        property.building_name
-                                                    }
-                                                </h3>
-
-                                                <p>
-                                                    {
-                                                        property.floor_label
-                                                    }{" "}
-                                                    · Unit{" "}
-                                                    {
-                                                        property.unit_number
-                                                    }
-                                                </p>
-                                            </div>
-                                        </div>
-
-                                        <div className="property-vpid">
-                                            <span>
-                                                VPID
-                                            </span>
-
-                                            <strong>
-                                                {
-                                                    property.vertical_property_id
-                                                }
-                                            </strong>
-                                        </div>
-
-                                        <div className="property-details">
-                                            <div>
-                                                <span>
-                                                    ULPIN
-                                                </span>
-
-                                                <strong>
-                                                    {
-                                                        property.parent_ulpin
-                                                    }
-                                                </strong>
-                                            </div>
-
-                                            <div>
-                                                <span>
-                                                    Floor
-                                                </span>
-
-                                                <strong>
-                                                    {
-                                                        property.floor_number
-                                                    }
-                                                </strong>
-                                            </div>
-
-                                            <div>
-                                                <span>
-                                                    Area
-                                                </span>
-
-                                                <strong>
-                                                    {formatArea(
-                                                        property.area_sq_m
-                                                    )}
-                                                </strong>
-                                            </div>
-
-                                            <div>
-                                                <span>
-                                                    Elevation
-                                                </span>
-
-                                                <strong>
-                                                    {
-                                                        property.min_z
-                                                    }{" "}
-                                                    →{" "}
-                                                    {
-                                                        property.max_z
-                                                    }{" "}
-                                                    m
-                                                </strong>
-                                            </div>
-                                        </div>
-
-                                        <div className="property-card-footer">
-                                            <div className="submitted-info">
-                                                <span>
-                                                    Parcel
-                                                </span>
-
-                                                <strong>
-                                                    {
-                                                        property.parcel_number
-                                                    }
-                                                </strong>
-                                            </div>
-
-                                            <div className="property-actions">
-                                                <button
-                                                    type="button"
-                                                    className="primary-action"
-                                                    onClick={() =>
-                                                        openRegistrationForm(
-                                                            property
-                                                        )
-                                                    }
-                                                >
-                                                    Register Property
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </article>
-                                )
-                            )}
-                        </div>
-                    )}
-
-                    {availableProperties.length > 4 && (
-                        <div
-                            style={{
-                                display: "flex",
-                                justifyContent: "center",
-                                marginTop: "18px",
-                            }}
-                        >
-                            <button
-                                type="button"
-                                className="refresh-button"
-                                onClick={() =>
-                                    setShowAllAvailableProperties(
-                                        (current) => !current
-                                    )
-                                }
+                        <>
+                            <div
+                                style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "18px",
+                                }}
                             >
-                                {showAllAvailableProperties
-                                    ? "Show Less"
-                                    : `Show All ${availableProperties.length} Available Properties`}
-                            </button>
-                        </div>
+                                {visibleAvailableBuildings.map((building) => {
+                                    const isExpanded =
+                                        selectedAvailableBuildingId ===
+                                        building.buildingId;
+
+                                    const floorNumbers = Array.from(
+                                        new Set(
+                                            building.units.map(
+                                                (unit) => unit.floor_number
+                                            )
+                                        )
+                                    ).sort((a, b) => a - b);
+
+                                    return (
+                                        <article
+                                            key={building.buildingId}
+                                            style={{
+                                                border: "1px solid rgba(92, 133, 184, 0.28)",
+                                                borderRadius: "18px",
+                                                background: "rgba(10, 25, 44, 0.72)",
+                                                overflow: "hidden",
+                                                boxShadow: "0 16px 40px rgba(0, 0, 0, 0.14)",
+                                            }}
+                                        >
+                                            <div
+                                                style={{
+                                                    padding: "22px 24px",
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    justifyContent: "space-between",
+                                                    gap: "20px",
+                                                    borderBottom: isExpanded
+                                                        ? "1px solid rgba(92, 133, 184, 0.18)"
+                                                        : "none",
+                                                    flexWrap: "wrap",
+                                                }}
+                                            >
+                                                <div style={{ minWidth: "260px" }}>
+                                                    <div
+                                                        style={{
+                                                            fontSize: "14px",
+                                                            fontWeight: 900,
+                                                            letterSpacing: "0.16em",
+                                                            textTransform: "uppercase",
+                                                            color: "#69a9ff",
+                                                            marginBottom: "7px",
+                                                        }}
+                                                    >
+                                                        {building.state}
+                                                    </div>
+
+                                                    <h3
+                                                        style={{
+                                                            margin: 0,
+                                                            fontSize: "25px",
+                                                            lineHeight: 1.2,
+                                                            fontWeight: 800,
+                                                            color: "#f4f7fb",
+                                                        }}
+                                                    >
+                                                        {building.buildingName}
+                                                    </h3>
+
+                                                    <div
+                                                        style={{
+                                                            marginTop: "9px",
+                                                            display: "flex",
+                                                            flexWrap: "wrap",
+                                                            gap: "10px 18px",
+                                                            fontSize: "12px",
+                                                            color: "#8fa5c0",
+                                                        }}
+                                                    >
+                                                        <span>
+                                                            ULPIN:{" "}
+                                                            <strong style={{ color: "#c8d8ec" }}>
+                                                                {building.ulpin}
+                                                            </strong>
+                                                        </span>
+                                                        <span>
+                                                            Parcel:{" "}
+                                                            <strong style={{ color: "#c8d8ec" }}>
+                                                                {building.parcelNumber}
+                                                            </strong>
+                                                        </span>
+                                                        <span>
+                                                            {building.units.length} Apartments
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                <div
+                                                    style={{
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        gap: "18px",
+                                                    }}
+                                                >
+                                                    <div style={{ textAlign: "right" }}>
+                                                        <div
+                                                            style={{
+                                                                fontSize: "12px",
+                                                                color: "#849ab4",
+                                                            }}
+                                                        >
+                                                            Available
+                                                        </div>
+                                                        <div
+                                                            style={{
+                                                                marginTop: "4px",
+                                                                fontSize: "20px",
+                                                                fontWeight: 800,
+                                                                color: "#eaf2ff",
+                                                            }}
+                                                        >
+                                                            {building.availableCount}{" "}
+                                                            <span
+                                                                style={{
+                                                                    fontSize: "13px",
+                                                                    fontWeight: 500,
+                                                                    color: "#849ab4",
+                                                                }}
+                                                            >
+                                                                of {building.units.length}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    <button
+                                                        type="button"
+                                                        className="primary-action"
+                                                        onClick={() =>
+                                                            setSelectedAvailableBuildingId(
+                                                                isExpanded
+                                                                    ? null
+                                                                    : building.buildingId
+                                                            )
+                                                        }
+                                                    >
+                                                        {isExpanded
+                                                            ? "Hide Apartments"
+                                                            : "View Apartments"}
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {isExpanded && (
+                                                <div
+                                                    style={{
+                                                        padding: "22px 24px 26px",
+                                                        background: "rgba(6, 18, 34, 0.48)",
+                                                    }}
+                                                >
+                                                    <div
+                                                        style={{
+                                                            display: "flex",
+                                                            justifyContent: "space-between",
+                                                            alignItems: "center",
+                                                            gap: "12px",
+                                                            marginBottom: "18px",
+                                                            flexWrap: "wrap",
+                                                        }}
+                                                    >
+                                                        <div>
+                                                            <div
+                                                                style={{
+                                                                    fontSize: "12px",
+                                                                    fontWeight: 800,
+                                                                    letterSpacing: "0.12em",
+                                                                    textTransform: "uppercase",
+                                                                    color: "#7198c7",
+                                                                }}
+                                                            >
+                                                                SELECT APARTMENT
+                                                            </div>
+                                                            <div
+                                                                style={{
+                                                                    marginTop: "5px",
+                                                                    fontSize: "13px",
+                                                                    color: "#879bb5",
+                                                                }}
+                                                            >
+                                                                Bright apartments are available. Dim apartments are already registered.
+                                                            </div>
+                                                        </div>
+
+                                                        <div
+                                                            style={{
+                                                                display: "flex",
+                                                                gap: "8px",
+                                                                alignItems: "center",
+                                                                fontSize: "11px",
+                                                                color: "#91a5be",
+                                                            }}
+                                                        >
+                                                            <span
+                                                                style={{
+                                                                    width: "9px",
+                                                                    height: "9px",
+                                                                    borderRadius: "50%",
+                                                                    background: "#4da3ff",
+                                                                    display: "inline-block",
+                                                                }}
+                                                            />
+                                                            Available
+                                                            <span
+                                                                style={{
+                                                                    marginLeft: "8px",
+                                                                    width: "9px",
+                                                                    height: "9px",
+                                                                    borderRadius: "50%",
+                                                                    background: "#33445a",
+                                                                    display: "inline-block",
+                                                                }}
+                                                            />
+                                                            Registered
+                                                        </div>
+                                                    </div>
+
+                                                    <div
+                                                        style={{
+                                                            display: "flex",
+                                                            flexDirection: "column",
+                                                            gap: "18px",
+                                                        }}
+                                                    >
+                                                        {floorNumbers.map((floorNumber) => {
+                                                            const floorUnits = building.units.filter(
+                                                                (unit) => unit.floor_number === floorNumber
+                                                            );
+                                                            const floorLabel =
+                                                                floorUnits[0]?.floor_label ??
+                                                                `Floor ${floorNumber}`;
+
+                                                            return (
+                                                                <div
+                                                                    key={`${building.buildingId}-${floorNumber}`}
+                                                                >
+                                                                    <div
+                                                                        style={{
+                                                                            fontSize: "14px",
+                                                                            fontWeight: 800,
+                                                                            color: "#d8e6f7",
+                                                                            marginBottom: "10px",
+                                                                        }}
+                                                                    >
+                                                                        {floorLabel}
+                                                                    </div>
+
+                                                                    <div
+                                                                        style={{
+                                                                            display: "grid",
+                                                                            gridTemplateColumns: "repeat(auto-fill, minmax(105px, 1fr))",
+                                                                            gap: "10px",
+                                                                        }}
+                                                                    >
+                                                                        {floorUnits.map((property) => {
+                                                                            const isAvailable =
+                                                                                availableUnitIds.has(property.id);
+
+                                                                            return (
+                                                                                <button
+                                                                                    key={property.id}
+                                                                                    type="button"
+                                                                                    disabled={!isAvailable}
+                                                                                    onClick={() => {
+                                                                                        if (isAvailable) {
+                                                                                            openRegistrationForm(property);
+                                                                                        }
+                                                                                    }}
+                                                                                    title={
+                                                                                        isAvailable
+                                                                                            ? `Register Unit ${property.unit_number}`
+                                                                                            : `Unit ${property.unit_number} is already registered`
+                                                                                    }
+                                                                                    style={{
+                                                                                        minHeight: "74px",
+                                                                                        padding: "10px 8px",
+                                                                                        borderRadius: "12px",
+                                                                                        border: isAvailable
+                                                                                            ? "1px solid rgba(77, 163, 255, 0.55)"
+                                                                                            : "1px solid rgba(75, 94, 119, 0.25)",
+                                                                                        background: isAvailable
+                                                                                            ? "rgba(35, 91, 151, 0.38)"
+                                                                                            : "rgba(28, 41, 58, 0.48)",
+                                                                                        color: isAvailable
+                                                                                            ? "#eef6ff"
+                                                                                            : "#66778e",
+                                                                                        cursor: isAvailable
+                                                                                            ? "pointer"
+                                                                                            : "not-allowed",
+                                                                                        opacity: isAvailable ? 1 : 0.58,
+                                                                                        display: "flex",
+                                                                                        flexDirection: "column",
+                                                                                        alignItems: "center",
+                                                                                        justifyContent: "center",
+                                                                                        gap: "5px",
+                                                                                        transition: "transform 0.18s ease, border-color 0.18s ease, background 0.18s ease",
+                                                                                    }}
+                                                                                >
+                                                                                    <strong style={{ fontSize: "17px" }}>
+                                                                                        {property.unit_number}
+                                                                                    </strong>
+                                                                                    <span
+                                                                                        style={{
+                                                                                            fontSize: "10px",
+                                                                                            letterSpacing: "0.05em",
+                                                                                            textTransform: "uppercase",
+                                                                                        }}
+                                                                                    >
+                                                                                        {isAvailable
+                                                                                            ? "Available"
+                                                                                            : "Registered"}
+                                                                                    </span>
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </article>
+                                    );
+                                })}
+                            </div>
+
+                            {availableBuildings.length > 4 && (
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        justifyContent: "center",
+                                        marginTop: "18px",
+                                    }}
+                                >
+                                    <button
+                                        type="button"
+                                        className="refresh-button"
+                                        onClick={() =>
+                                            setShowAllAvailableProperties(
+                                                (current) => !current
+                                            )
+                                        }
+                                    >
+                                        {showAllAvailableProperties
+                                            ? "Show Less"
+                                            : `Show All ${availableBuildings.length} Buildings`}
+                                    </button>
+                                </div>
+                            )}
+                        </>
                     )}
                 </section>
 
@@ -1635,11 +2207,15 @@ const response = await fetch(
                                             >
                                                 <span className="status-dot" />
 
-                                                {
-                                                    statusLabel(
+                                                {isRegistrationTransferred(
+                                                    registration
+                                                )
+                                                    ? `Transferred to ${getDisplayOwner(
+                                                        registration
+                                                    ).name}`
+                                                    : statusLabel(
                                                         registration.status
-                                                    )
-                                                }
+                                                    )}
                                             </div>
 
                                             {registration.registration_number && (
@@ -1735,10 +2311,9 @@ const response = await fetch(
 
                                                 <strong>
                                                     {formatPercentage(
-                                                        registration
-                                                            .ownership
-                                                            ?.percentage ??
-                                                        0
+                                                        getDisplayOwner(
+                                                            registration
+                                                        ).percentage
                                                     )}
                                                 </strong>
                                             </div>
@@ -1795,26 +2370,25 @@ const response = await fetch(
 
                                             <div>
                                                 <span>
-                                                    Registered
-                                                    Owner
+                                                    {isRegistrationTransferred(
+                                                        registration
+                                                    )
+                                                        ? "Current Owner"
+                                                        : "Registered Owner"}
                                                 </span>
 
                                                 <strong>
-                                                    {
+                                                    {getDisplayOwner(
                                                         registration
-                                                            .owner
-                                                            ?.name ??
-                                                        "Not assigned"
-                                                    }
+                                                    ).name}
                                                 </strong>
                                             </div>
 
                                             <div className="owner-percentage">
                                                 {formatPercentage(
-                                                    registration
-                                                        .ownership
-                                                        ?.percentage ??
-                                                    0
+                                                    getDisplayOwner(
+                                                        registration
+                                                    ).percentage
                                                 )}
                                             </div>
                                         </div>
@@ -1857,50 +2431,64 @@ const response = await fetch(
                                                     History
                                                 </button>
 
-                                                {registration.status === "APPROVED" && (
+                                                {registration.status === "APPROVED" &&
+                                                    !isRegistrationTransferred(
+                                                        registration
+                                                    ) &&
+                                                    currentOwnershipByPropertyUnitId[
+                                                        registration.property_unit_id
+                                                    ] && (
+                                                        <button
+                                                            type="button"
+                                                            className="secondary-action"
+                                                            onClick={() =>
+                                                                openTransferForm(
+                                                                    registration
+                                                                )
+                                                            }
+                                                        >
+                                                            Transfer Property
+                                                        </button>
+                                                    )}
+
+                                                {registration.status === "APPROVED" &&
+                                                    !isRegistrationTransferred(
+                                                        registration
+                                                    ) &&
+                                                    currentOwnershipByPropertyUnitId[
+                                                        registration.property_unit_id
+                                                    ] && (
                                                     <button
                                                         type="button"
-                                                        className="secondary-action"
+                                                        className="primary-action"
                                                         onClick={() =>
-                                                            openTransferForm(
+                                                            open3DExplorer(
                                                                 registration
                                                             )
                                                         }
                                                     >
-                                                        Transfer Property
+                                                        <svg
+                                                            viewBox="0 0 24 24"
+                                                            aria-hidden="true"
+                                                        >
+                                                            <path
+                                                                d="M12 3.5 20 8v8l-8 4.5L4 16V8l8-4.5Z"
+                                                                fill="none"
+                                                                stroke="currentColor"
+                                                                strokeLinejoin="round"
+                                                                strokeWidth="1.5"
+                                                            />
+                                                            <path
+                                                                d="M4.5 8.2 12 12l7.5-3.8M12 12v8"
+                                                                fill="none"
+                                                                stroke="currentColor"
+                                                                strokeLinejoin="round"
+                                                                strokeWidth="1.5"
+                                                            />
+                                                        </svg>
+                                                        Open in 3D
                                                     </button>
                                                 )}
-
-                                                <button
-                                                    type="button"
-                                                    className="primary-action"
-                                                    onClick={() =>
-                                                        open3DExplorer(
-                                                            registration
-                                                        )
-                                                    }
-                                                >
-                                                    <svg
-                                                        viewBox="0 0 24 24"
-                                                        aria-hidden="true"
-                                                    >
-                                                        <path
-                                                            d="M12 3.5 20 8v8l-8 4.5L4 16V8l8-4.5Z"
-                                                            fill="none"
-                                                            stroke="currentColor"
-                                                            strokeLinejoin="round"
-                                                            strokeWidth="1.5"
-                                                        />
-                                                        <path
-                                                            d="M4.5 8.2 12 12l7.5-3.8M12 12v8"
-                                                            fill="none"
-                                                            stroke="currentColor"
-                                                            strokeLinejoin="round"
-                                                            strokeWidth="1.5"
-                                                        />
-                                                    </svg>
-                                                    Open in 3D
-                                                </button>
                                             </div>
                                         </div>
                                     </article>
@@ -2267,9 +2855,15 @@ const response = await fetch(
                             >
                                 <span className="status-dot" />
 
-                                {statusLabel(
-                                    selectedRegistration.status
-                                )}
+                                {isRegistrationTransferred(
+                                    selectedRegistration
+                                )
+                                    ? `Transferred to ${getDisplayOwner(
+                                        selectedRegistration
+                                    ).name}`
+                                    : statusLabel(
+                                        selectedRegistration.status
+                                    )}
                             </div>
 
                             {selectedRegistration.registration_number && (
@@ -2391,54 +2985,71 @@ const response = await fetch(
                                 Ownership
                             </h3>
 
-                            <div className="ownership-panel">
-                                <div className="owner-avatar large">
-                                    {(
+                            {(() => {
+                                const liveOwner =
+                                    getDisplayOwner(
                                         selectedRegistration
-                                            .owner?.name ??
-                                        "?"
-                                    )
-                                        .charAt(0)
-                                        .toUpperCase()}
-                                </div>
+                                    );
 
-                                <div className="ownership-person">
-                                    <span>
-                                        Owner
-                                    </span>
+                                const transferred =
+                                    isRegistrationTransferred(
+                                        selectedRegistration
+                                    );
 
-                                    <strong>
-                                        {
-                                            selectedRegistration
-                                                .owner
-                                                ?.name
-                                        }
-                                    </strong>
+                                return (
+                                    <>
+                                        <div className="ownership-panel">
+                                            <div className="owner-avatar large">
+                                                {liveOwner.name
+                                                    .charAt(0)
+                                                    .toUpperCase()}
+                                            </div>
 
-                                    <small>
-                                        {
-                                            selectedRegistration
-                                                .owner
-                                                ?.contact
-                                        }
-                                    </small>
-                                </div>
+                                            <div className="ownership-person">
+                                                <span>
+                                                    {transferred
+                                                        ? "Transferred To"
+                                                        : "Owner"}
+                                                </span>
 
-                                <div className="ownership-value">
-                                    <span>
-                                        Ownership
-                                    </span>
+                                                <strong>
+                                                    {liveOwner.name}
+                                                </strong>
 
-                                    <strong>
-                                        {formatPercentage(
-                                            selectedRegistration
-                                                .ownership
-                                                ?.percentage ??
-                                            0
+                                                <small>
+                                                    {liveOwner.contact ??
+                                                        "Contact not available"}
+                                                </small>
+                                            </div>
+
+                                            <div className="ownership-value">
+                                                <span>
+                                                    Ownership
+                                                </span>
+
+                                                <strong>
+                                                    {formatPercentage(
+                                                        liveOwner.percentage
+                                                    )}
+                                                </strong>
+                                            </div>
+                                        </div>
+
+                                        {transferred && (
+                                            <div className="remarks-box">
+                                                <span>
+                                                    Ownership Status
+                                                </span>
+
+                                                <p>
+                                                    This property has been transferred to {liveOwner.name}.
+                                                    The previous ownership record is preserved in Property History.
+                                                </p>
+                                            </div>
                                         )}
-                                    </strong>
-                                </div>
-                            </div>
+                                    </>
+                                );
+                            })()}
                         </div>
 
                         <div className="modal-section">
@@ -2574,39 +3185,47 @@ const response = await fetch(
                                 Close
                             </button>
 
-                            <button
-                                type="button"
-                                className="primary-action"
-                                onClick={() => {
-                                    open3DExplorer(
-                                        selectedRegistration
-                                    );
-                                    setSelectedRegistration(
-                                        null
-                                    );
-                                }}
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    aria-hidden="true"
+                            {selectedRegistration.status === "APPROVED" &&
+                                !isRegistrationTransferred(
+                                    selectedRegistration
+                                ) &&
+                                currentOwnershipByPropertyUnitId[
+                                    selectedRegistration.property_unit_id
+                                ] && (
+                                <button
+                                    type="button"
+                                    className="primary-action"
+                                    onClick={() => {
+                                        open3DExplorer(
+                                            selectedRegistration
+                                        );
+                                        setSelectedRegistration(
+                                            null
+                                        );
+                                    }}
                                 >
-                                    <path
-                                        d="M12 3.5 20 8v8l-8 4.5L4 16V8l8-4.5Z"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeLinejoin="round"
-                                        strokeWidth="1.5"
-                                    />
-                                    <path
-                                        d="M4.5 8.2 12 12l7.5-3.8M12 12v8"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeLinejoin="round"
-                                        strokeWidth="1.5"
-                                    />
-                                </svg>
-                                Open Property in 3D
-                            </button>
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        aria-hidden="true"
+                                    >
+                                        <path
+                                            d="M12 3.5 20 8v8l-8 4.5L4 16V8l8-4.5Z"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeLinejoin="round"
+                                            strokeWidth="1.5"
+                                        />
+                                        <path
+                                            d="M4.5 8.2 12 12l7.5-3.8M12 12v8"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeLinejoin="round"
+                                            strokeWidth="1.5"
+                                        />
+                                    </svg>
+                                    Open Property in 3D
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -2739,12 +3358,9 @@ const response = await fetch(
                                 </span>
 
                                 <strong>
-                                    {
+                                    {getDisplayOwner(
                                         transferRegistration
-                                            .owner
-                                            ?.name ??
-                                        "Not available"
-                                    }
+                                    ).name}
                                 </strong>
                             </div>
                         </div>
@@ -3221,19 +3837,9 @@ const response = await fetch(
                                                         <div className="audit-content">
                                                             <div className="audit-header">
                                                                 <strong>
-                                                                    {audit.action ===
-                                                                        "CITIZEN_REGISTRATION_SUBMITTED"
-                                                                        ? "Registration Submitted"
-                                                                        : audit.action ===
-                                                                            "REGISTRATION_APPROVED"
-                                                                            ? "Registration Approved"
-                                                                            : audit.action ===
-                                                                                "REGISTRATION_REJECTED"
-                                                                                ? "Registration Rejected"
-                                                                                : audit.action.replace(
-                                                                                    /_/g,
-                                                                                    " "
-                                                                                )}
+                                                                    {auditActionLabel(
+                                                                    audit.action
+                                                                )}
                                                                 </strong>
 
                                                                 <span>
